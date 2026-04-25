@@ -16,8 +16,10 @@ next-env.d.ts
 # vercel
 .vercel
 
-# env
-.env*.local
+# env — never commit any secrets
+.env
+.env.*
+!.env.example
 
 # editor
 .DS_Store

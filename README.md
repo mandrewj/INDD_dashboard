@@ -62,12 +62,43 @@ npm run build:data    # Re-run the Python data pipeline
 
 ## Updating data
 
-When a new GBIF occurrence download is available:
+### Automatic: pull a fresh GBIF download
+
+`scripts/refresh_gbif_data.py` submits a fresh occurrence download to GBIF
+(filter: class Insecta · STATE_PROVINCE Indiana · OCCURRENCE_STATUS present),
+polls every 10 minutes until ready, downloads the TSV into `./data/`, and
+updates `lib/citation.ts` with the new DOI and date.
+
+```bash
+# 1. One-time setup
+cp .env.example .env
+# Edit .env with your GBIF username and password.
+# .env is gitignored — never commit it.
+
+# 2. Refresh
+npm run refresh:gbif
+# (or: python3 scripts/refresh_gbif_data.py [--poll-seconds 60] [--resume KEY])
+
+# 3. Rebuild the static bundle and ship it
+npm run build:data
+git add data/IN_data.txt public/data/ lib/citation.ts
+git commit -m "Update GBIF data to <new DOI>"
+git push   # Vercel auto-redeploys
+```
+
+GBIF downloads typically take 5–30 minutes for a query this size. The script
+prints a `https://www.gbif.org/occurrence/download/<key>` URL right after
+submission so you can watch progress in the browser too. If your shell
+disconnects mid-poll, restart with `--resume <key>` to rejoin without
+re-submitting.
+
+### Manual: drop in your own TSV
+
+If you've downloaded the file by other means:
 
 1. Replace `./data/IN_data.txt` with the new TSV.
 2. Edit `lib/citation.ts` — bump `GBIF_DOI`, `GBIF_DOI_URL`, and
-   `GBIF_DOWNLOAD_DATE`. The footer citation and the cache-busting fetch URLs
-   pick this up automatically.
+   `GBIF_DOWNLOAD_DATE`.
 3. `npm run build:data`
 4. Commit `lib/citation.ts` and the regenerated files in `/public/data/`.
 

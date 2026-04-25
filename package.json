@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "next lint",
     "build:data": "python3 scripts/build_data.py",
+    "refresh:gbif": "python3 scripts/refresh_gbif_data.py",
     "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js"
   },
   "dependencies": {
