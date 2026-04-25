@@ -1,0 +1,61 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+  --rule: rgba(36, 65, 38, 0.12);
+}
+
+@layer base {
+  /* Headings inherit the serif stack from font-serif */
+  h1, h2, h3 {
+    font-family: var(--font-fraunces), ui-serif, Georgia, serif;
+    font-feature-settings: "ss01", "ss02";
+  }
+  body {
+    font-feature-settings: "cv11", "ss01";
+  }
+}
+
+@layer components {
+  /* Card surface — warm paper, hairline forest border, soft leaf shadow */
+  .nature-card {
+    @apply rounded-xl border border-forest-100 bg-cream-50/85 backdrop-blur-[1px]
+           shadow-leaf;
+  }
+  .nature-card-accent {
+    @apply relative overflow-hidden;
+  }
+  .nature-card-accent::before {
+    content: "";
+    @apply absolute inset-x-0 top-0 h-[3px] bg-gradient-to-r
+           from-forest-500 via-moss-400 to-ochre-400;
+  }
+
+  /* Section heading with leaf rule underneath */
+  .leaf-rule {
+    @apply relative pb-2;
+  }
+  .leaf-rule::after {
+    content: "";
+    @apply absolute left-0 bottom-0 h-[2px] w-12 bg-forest-600 rounded-full;
+  }
+}
+
+/* Visible focus ring for keyboard nav (forest, not browser blue) */
+:where(button, a, input, select, [role="button"]):focus-visible {
+  outline: 2px solid theme('colors.forest.600');
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Subtle hand-drawn divider helper */
+.botanical-divider {
+  background-image:
+    radial-gradient(circle, theme('colors.forest.300') 1px, transparent 1.4px);
+  background-size: 12px 100%;
+  background-repeat: repeat-x;
+  background-position: center;
+  height: 1px;
+}

@@ -1,0 +1,38 @@
+# dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# next
+.next/
+out/
+
+# build & cache
+.swc/
+.cache/
+*.tsbuildinfo
+next-env.d.ts
+
+# vercel
+.vercel
+
+# env
+.env*.local
+
+# editor
+.DS_Store
+.vscode/
+.idea/
+
+# Claude Code local settings (per-machine; don't share)
+.claude/
+
+# data: keep the build outputs in public/data/, ignore the raw input and the
+# scratch shapefile cache (both are large and easily regenerated)
+/data/IN_data.txt
+/scripts/_cache/
+
+# python venv if user adds one later
+.venv/
+__pycache__/
+*.pyc
