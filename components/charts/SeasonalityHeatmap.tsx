@@ -346,7 +346,7 @@ function Grid({
             x={ROW_LABEL_W + COL_W * i + COL_W / 2}
             y={TOP_LABEL_H - 6}
             fontSize={10}
-            fill="#535D31"
+            fill="#5f6360"
             textAnchor="middle"
           >
             {m}
@@ -366,7 +366,7 @@ function Grid({
                 x={ROW_LABEL_W - 8}
                 y={ROW_H / 2 + 3}
                 fontSize={11}
-                fill={row.isParent ? "#1B331C" : "#244126"}
+                fill={row.isParent ? "#080808" : "#080808"}
                 fontWeight={row.isParent ? 700 : 400}
                 fontStyle={row.italic ? "italic" : "normal"}
                 textAnchor="end"
@@ -377,7 +377,7 @@ function Grid({
                 x={ROW_LABEL_W - 8}
                 y={ROW_H / 2 + 16}
                 fontSize={9}
-                fill="#6B7741"
+                fill="#5f6360"
                 textAnchor="end"
               >
                 {row.total.toLocaleString()}
@@ -385,7 +385,7 @@ function Grid({
 
               {row.monthly.map((n, mIdx) => {
                 const t = denom > 0 ? n / denom : 0;
-                const fill = n === 0 ? "#F5EFE2" : viridis(t);
+                const fill = n === 0 ? "#F1F3F5" : viridis(t);
                 return (
                   <rect
                     key={mIdx}
@@ -395,7 +395,7 @@ function Grid({
                     height={ROW_H - 4}
                     rx={2}
                     fill={fill}
-                    stroke={row.isParent ? "#244126" : "#FBF8F1"}
+                    stroke={row.isParent ? "#080808" : "#FFFFFF"}
                     strokeWidth={row.isParent ? 1 : 1}
                     onMouseEnter={() => onHover({ row: row.label, month: mIdx, n })}
                     onMouseLeave={() => onHover(null)}
@@ -419,7 +419,7 @@ function Grid({
             x2={width}
             y1={TOP_LABEL_H + ROW_H + PARENT_GAP / 2}
             y2={TOP_LABEL_H + ROW_H + PARENT_GAP / 2}
-            stroke="#DDE8D9"
+            stroke="#E5E7EB"
             strokeWidth={1}
           />
         ) : null}
@@ -429,7 +429,7 @@ function Grid({
             x={ROW_LABEL_W + (COL_W * 12) / 2}
             y={TOP_LABEL_H + ROW_H + PARENT_GAP + ROW_H / 2}
             fontSize={11}
-            fill="#6B7741"
+            fill="#5f6360"
             textAnchor="middle"
           >
             No records below this group are identified to a finer rank.

@@ -131,11 +131,11 @@ export function ObservationsOverTime() {
             <ComposedChart data={points} margin={{ top: 8, right: 16, bottom: 4, left: 0 }}>
               <defs>
                 <linearGradient id="forest-gradient" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#3F6F3A" stopOpacity={0.35} />
-                  <stop offset="100%" stopColor="#3F6F3A" stopOpacity={0.02} />
+                  <stop offset="0%" stopColor="#116dff" stopOpacity={0.35} />
+                  <stop offset="100%" stopColor="#116dff" stopOpacity={0.02} />
                 </linearGradient>
               </defs>
-              <CartesianGrid stroke="#DDE8D9" strokeDasharray="3 4" vertical={false} />
+              <CartesianGrid stroke="#E5E7EB" strokeDasharray="3 4" vertical={false} />
               <XAxis
                 dataKey="x"
                 type="number"
@@ -149,23 +149,23 @@ export function ObservationsOverTime() {
                         return `${y}-${String(m).padStart(2, "0")}`;
                       })()
                 }
-                tick={{ fill: "#535D31", fontSize: 11 }}
-                stroke="#B7CDB1"
+                tick={{ fill: "#5f6360", fontSize: 11 }}
+                stroke="#D9DDDF"
                 minTickGap={28}
               />
               <YAxis
-                tick={{ fill: "#535D31", fontSize: 11 }}
-                stroke="#B7CDB1"
+                tick={{ fill: "#5f6360", fontSize: 11 }}
+                stroke="#D9DDDF"
                 tickFormatter={(v: number) => v.toLocaleString()}
                 width={48}
               />
               <Tooltip
                 contentStyle={{
-                  background: "#FBF8F1",
-                  border: "1px solid #B7CDB1",
+                  background: "#FFFFFF",
+                  border: "1px solid #D9DDDF",
                   borderRadius: 8,
                   fontSize: 12,
-                  color: "#244126",
+                  color: "#080808",
                 }}
                 labelFormatter={(_, payload) => {
                   const p = payload?.[0]?.payload as Point | undefined;
@@ -183,10 +183,10 @@ export function ObservationsOverTime() {
               <Line
                 type="monotone"
                 dataKey="count"
-                stroke="#2F5233"
+                stroke="#116dff"
                 strokeWidth={2}
                 dot={false}
-                activeDot={{ r: 4, fill: "#2F5233", stroke: "#FBF8F1", strokeWidth: 2 }}
+                activeDot={{ r: 4, fill: "#116dff", stroke: "#FFFFFF", strokeWidth: 2 }}
                 isAnimationActive={false}
               />
             </ComposedChart>

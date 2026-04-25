@@ -83,7 +83,7 @@ export function TaxonomicComposition() {
               }))}
               dataKey="size"
               isAnimationActive={false}
-              stroke="#FBF8F1"
+              stroke="#FFFFFF"
               content={<TreemapCell />}
             >
               <Tooltip content={<TreemapTooltip />} />
@@ -258,12 +258,12 @@ function TreemapCell(props: unknown) {
     if (depth === 1) {
       return (
         <g>
-          <rect x={x} y={y} width={width} height={height} fill="transparent" stroke="#FBF8F1" strokeWidth={2} />
+          <rect x={x} y={y} width={width} height={height} fill="transparent" stroke="#FFFFFF" strokeWidth={2} />
           {width > 80 && height > 24 ? (
             <text
               x={x + 6}
               y={y + 14}
-              fill="#1B331C"
+              fill="#080808"
               fontSize={11}
               fontWeight={600}
               style={{ pointerEvents: "none" }}
@@ -290,7 +290,7 @@ function TreemapCell(props: unknown) {
         width={width}
         height={height}
         fill={fill}
-        stroke="#FBF8F1"
+        stroke="#FFFFFF"
         strokeWidth={1}
       />
       {showLabel ? (
@@ -412,11 +412,11 @@ function parseColor(c: string): [number, number, number] | null {
 
 function textColorOn(bg: string): string {
   const rgb = parseColor(bg);
-  if (!rgb) return "#1B331C";
+  if (!rgb) return "#080808";
   // WCAG luminance approximation
   const [r, g, b] = rgb;
   const luma = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-  return luma > 0.6 ? "#1B331C" : "#FBF8F1";
+  return luma > 0.6 ? "#080808" : "#FFFFFF";
 }
 
 function truncate(s: string, max: number): string {

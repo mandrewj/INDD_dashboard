@@ -1,18 +1,15 @@
 import type { Metadata } from "next";
-import { Fraunces, Inter } from "next/font/google";
+import { Lato } from "next/font/google";
 import "./globals.css";
 
-const inter = Inter({
+// Lato matches insectid.org's typography. We load light/regular/bold so
+// headings can use 700 while body uses 400 (and "light" 300 is available if
+// we ever want to mirror the parent site's lighter body weight exactly).
+const lato = Lato({
   subsets: ["latin"],
+  weight: ["300", "400", "700", "900"],
   display: "swap",
-  variable: "--font-inter",
-});
-
-const fraunces = Fraunces({
-  subsets: ["latin"],
-  display: "swap",
-  variable: "--font-fraunces",
-  axes: ["opsz", "SOFT"],
+  variable: "--font-lato",
 });
 
 export const metadata: Metadata = {
@@ -27,7 +24,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className={`${inter.variable} ${fraunces.variable}`}>
+    <html lang="en" className={lato.variable}>
       <body className="min-h-screen bg-field-paper font-sans text-bark-700 antialiased">
         {children}
       </body>

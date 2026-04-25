@@ -130,7 +130,7 @@ export function CountyChoropleth() {
                     : stats.observations
                   : 0;
                 const t = maxValue > 0 ? value / maxValue : 0;
-                const fill = value === 0 ? "#F5EFE2" : viridis(t);
+                const fill = value === 0 ? "#F1F3F5" : viridis(t);
                 const isHovered = hovered === p.name;
                 const isSelected =
                   filters.countyId !== null &&
@@ -143,10 +143,10 @@ export function CountyChoropleth() {
                     fill={fill}
                     stroke={
                       isSelected
-                        ? "#D9A441"
+                        ? "#1F95B8"
                         : isHovered
-                          ? "#1B331C"
-                          : "#244126"
+                          ? "#080808"
+                          : "#080808"
                     }
                     strokeWidth={isSelected ? 2 : isHovered ? 1.4 : 0.5}
                     onMouseEnter={() => setHovered(p.name)}
