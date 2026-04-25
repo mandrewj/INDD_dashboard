@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  LaunchAgent for the weekly INDD dashboard data refresh.
+
+  Runs every Monday at 05:00 local time. If the Mac is asleep at that
+  time, launchd defers the job until the next wake. If the Mac is off,
+  the run is skipped entirely and the next chance is the following Monday.
+
+  Install:
+    cp scripts/com.iddl.indd-dashboard-refresh.plist ~/Library/LaunchAgents/
+    launchctl load -w ~/Library/LaunchAgents/com.iddl.indd-dashboard-refresh.plist
+
+  Inspect:
+    launchctl list | grep com.iddl.indd
+    tail -F ~/Library/Logs/INDD_dashboard_refresh.log
+    tail -F ~/Library/Logs/INDD_dashboard_refresh.{out,err}.log
+
+  Run on demand (without waiting for Monday):
+    launchctl start com.iddl.indd-dashboard-refresh
+
+  Disable:
+    launchctl unload -w ~/Library/LaunchAgents/com.iddl.indd-dashboard-refresh.plist
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.iddl.indd-dashboard-refresh</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/andrew/Documents/Research/AI workflows/INDD_dashboard/scripts/cron_refresh.sh</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/andrew/Documents/Research/AI workflows/INDD_dashboard</string>
+
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Weekday</key>
+        <integer>1</integer>
+        <key>Hour</key>
+        <integer>5</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>/Users/andrew/Library/Logs/INDD_dashboard_refresh.out.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/andrew/Library/Logs/INDD_dashboard_refresh.err.log</string>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+</dict>
+</plist>
