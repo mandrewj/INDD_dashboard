@@ -5,8 +5,8 @@
  * The GBIF "Cite this download" snippet is generated on the download page.
  * We render the human-readable form in the footer and link to the DOI.
  */
-export const GBIF_DOI_URL = "https://doi.org/10.15468/dl.h4g94t";
-export const GBIF_DOI = "10.15468/dl.h4g94t";
+export const GBIF_DOI_URL = "https://doi.org/10.15468/dl.3r8a5v";
+export const GBIF_DOI = "10.15468/dl.3r8a5v";
 export const GBIF_DOWNLOAD_DATE = "2026-04-25";
 
 export const GBIF_CITATION =

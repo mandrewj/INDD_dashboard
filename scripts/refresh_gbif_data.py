@@ -37,6 +37,7 @@ import json
 import os
 import re
 import shutil
+import ssl
 import sys
 import time
 import urllib.error
@@ -44,6 +45,24 @@ import urllib.request
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
+
+
+def build_ssl_context() -> ssl.SSLContext:
+    """Build an SSL context with a trustworthy CA bundle.
+
+    python.org's macOS framework Python ships with an empty trust store and
+    requires either Install Certificates.command or an explicit CA bundle.
+    Prefer certifi (pip-installable, single-file, cross-platform); fall back
+    to the system default for everywhere else.
+    """
+    try:
+        import certifi  # type: ignore[import-not-found]
+        return ssl.create_default_context(cafile=certifi.where())
+    except ImportError:
+        return ssl.create_default_context()
+
+
+SSL_CTX = build_ssl_context()
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT / "data"
@@ -119,7 +138,7 @@ def submit_download(predicate: dict, user: str, password: str) -> str:
         method="POST",
     )
     try:
-        with urllib.request.urlopen(req, timeout=60) as resp:
+        with urllib.request.urlopen(req, timeout=60, context=SSL_CTX) as resp:
             return resp.read().decode().strip()
     except urllib.error.HTTPError as e:
         if e.code == 401:
@@ -133,7 +152,7 @@ def get_status(key: str) -> dict:
         f"{API_BASE}/{key}",
         headers={"Accept": "application/json", "User-Agent": "INDD-Dashboard-Refresh/1.0"},
     )
-    with urllib.request.urlopen(req, timeout=60) as resp:
+    with urllib.request.urlopen(req, timeout=60, context=SSL_CTX) as resp:
         return json.loads(resp.read())
 
 
@@ -143,7 +162,7 @@ def download_zip(key: str, dest: Path) -> None:
         url, headers={"User-Agent": "INDD-Dashboard-Refresh/1.0"}
     )
     tmp = dest.with_suffix(dest.suffix + ".part")
-    with urllib.request.urlopen(req, timeout=300) as resp, open(tmp, "wb") as f:
+    with urllib.request.urlopen(req, timeout=300, context=SSL_CTX) as resp, open(tmp, "wb") as f:
         shutil.copyfileobj(resp, f, length=1024 * 1024)
     tmp.rename(dest)
 
