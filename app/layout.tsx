@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Lato } from "next/font/google";
+import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
 
 // Lato matches insectid.org's typography. We load light/regular/bold so
@@ -27,6 +28,7 @@ export default function RootLayout({
     <html lang="en" className={lato.variable}>
       <body className="min-h-screen bg-field-paper font-sans text-bark-700 antialiased">
         {children}
+        <Analytics />
       </body>
     </html>
   );
