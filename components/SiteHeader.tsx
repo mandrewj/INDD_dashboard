@@ -1,4 +1,5 @@
 import Image from "next/image";
+import Link from "next/link";
 import type { Precomputed } from "@/lib/types";
 
 export function SiteHeader({ precomputed }: { precomputed: Precomputed }) {
@@ -6,22 +7,31 @@ export function SiteHeader({ precomputed }: { precomputed: Precomputed }) {
     <header className="border-b border-forest-100 bg-cream-50/70 backdrop-blur">
       <div className="mx-auto flex max-w-7xl flex-col gap-4 px-6 py-6 sm:flex-row sm:items-end sm:justify-between">
         <div className="flex items-start gap-4">
-          <Image
-            src="/images/ahasverus-icon.png"
-            alt=""
-            width={64}
-            height={64}
-            priority
-            className="h-14 w-14 shrink-0 sm:h-16 sm:w-16"
-          />
-          <div>
+          <a
+            href="https://insectid.org"
+            className="shrink-0 rounded-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-forest-600"
+            aria-label="InsectID home"
+          >
+            <Image
+              src="/images/insectID.png"
+              alt="InsectID"
+              width={1094}
+              height={474}
+              priority
+              className="h-14 w-auto sm:h-16"
+            />
+          </a>
+          <Link
+            href="/"
+            className="rounded-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-forest-600"
+          >
             <p className="text-[11px] uppercase tracking-[0.2em] text-moss-600">
               Field Guide · Insect Diversity and Diagnostics Lab
             </p>
             <h1 className="mt-1 font-serif text-3xl font-semibold tracking-tight text-forest-800 sm:text-4xl">
               Indiana Insect Biodiversity
             </h1>
-          </div>
+          </Link>
         </div>
         <dl className="flex flex-wrap gap-x-6 gap-y-2 text-sm">
           <HeaderStat label="Records" value={precomputed.totalRecords.toLocaleString()} />
