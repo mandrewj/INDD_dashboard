@@ -92,6 +92,50 @@ submission so you can watch progress in the browser too. If your shell
 disconnects mid-poll, restart with `--resume <key>` to rejoin without
 re-submitting.
 
+### Weekly cron (launchd)
+
+A LaunchAgent runs the refresh + rebuild + commit/push pipeline every Monday
+at 05:00 local time. The pieces:
+
+- `scripts/cron_refresh.sh` — does `refresh:gbif` → `build:data` → commit/push
+  if anything changed; macOS notification on failure, silent on success.
+- `scripts/com.iddl.indd-dashboard-refresh.plist` — the LaunchAgent that
+  invokes the script. Installed copy lives at
+  `~/Library/LaunchAgents/com.iddl.indd-dashboard-refresh.plist`.
+- Logs: `~/Library/Logs/INDD_dashboard_refresh.{out,err,}.log`.
+
+```bash
+# Install (or reinstall after editing the plist):
+cp scripts/com.iddl.indd-dashboard-refresh.plist ~/Library/LaunchAgents/
+launchctl unload -w ~/Library/LaunchAgents/com.iddl.indd-dashboard-refresh.plist 2>/dev/null
+launchctl load   -w ~/Library/LaunchAgents/com.iddl.indd-dashboard-refresh.plist
+
+# Manually trigger (don't wait for Monday):
+launchctl start com.iddl.indd-dashboard-refresh
+
+# Inspect:
+launchctl list | grep com.iddl.indd
+tail -F ~/Library/Logs/INDD_dashboard_refresh.{out,err}.log
+```
+
+**Two macOS gotchas this setup works around** — both stem from the project
+living in `~/Documents/`, which is iCloud-synced and TCC-protected:
+
+1. **Full Disk Access for `/bin/bash`** (one-time, manual). Without it,
+   launchd cannot read the script and the run fails with `Operation not
+   permitted` (exit 126). Open **System Settings → Privacy & Security →
+   Full Disk Access**, click **+**, press **⌘⇧G**, type `/bin/bash`, click
+   **Open**, and toggle it on.
+2. **`osascript` wrapper around bash** (already wired into the plist). When
+   launchd spawns `/bin/bash` directly, `mmap()` calls on iCloud-synced
+   paths can deadlock against the FileProvider extension and fail with
+   `Resource deadlock avoided` — this killed both `.env` reads and `git
+   commit` in earlier revisions. Wrapping the bash invocation in
+   `osascript -e 'do shell script "..."'` detaches the spawned shell from
+   launchd's immediate child domain and bypasses the deadlock. If you ever
+   regenerate the plist and revert to a direct `/bin/bash` invocation, the
+   weekly run will start failing again at the commit stage.
+
 ### Manual: drop in your own TSV
 
 If you've downloaded the file by other means:
@@ -195,6 +239,9 @@ keeps `output` unset so Vercel's image optimizer handles the small icons.
 ├── scripts/
 │   ├── build_data.py            # Main pipeline (TSV → JSON bundle)
 │   ├── build_counties_geojson.py
+│   ├── refresh_gbif_data.py     # Submits + polls a fresh GBIF download
+│   ├── cron_refresh.sh          # Weekly launchd entry point
+│   ├── com.iddl.indd-dashboard-refresh.plist  # LaunchAgent definition
 │   └── profile.py               # One-off schema profiler
 ├── public/
 │   ├── data/             # Built data artifacts (committed)

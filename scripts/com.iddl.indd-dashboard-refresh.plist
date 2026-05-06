@@ -11,6 +11,12 @@
     cp scripts/com.iddl.indd-dashboard-refresh.plist ~/Library/LaunchAgents/
     launchctl load -w ~/Library/LaunchAgents/com.iddl.indd-dashboard-refresh.plist
 
+  One-time TCC grant (required because the project lives in ~/Documents):
+    System Settings -> Privacy & Security -> Full Disk Access -> "+"
+    -> Cmd+Shift+G -> /bin/bash -> Open -> toggle on.
+    Without this, launchd cannot read this script and the run fails
+    with "Operation not permitted" (exit 126).
+
   Inspect:
     launchctl list | grep com.iddl.indd
     tail -F ~/Library/Logs/INDD_dashboard_refresh.log
@@ -27,14 +33,22 @@
     <key>Label</key>
     <string>com.iddl.indd-dashboard-refresh</string>
 
+    <!--
+      Invoked via osascript (do shell script) instead of /bin/bash directly.
+      This detaches the spawned shell from launchd's immediate child domain,
+      which works around an EDEADLK ("Resource deadlock avoided") that
+      mmap() hits when launchd-spawned processes touch files inside an
+      iCloud-Drive-synced ~/Documents (FileProvider extension contention).
+    -->
     <key>ProgramArguments</key>
     <array>
-        <string>/bin/bash</string>
-        <string>/Users/andrew/Documents/Research/AI workflows/INDD_dashboard/scripts/cron_refresh.sh</string>
+        <string>/usr/bin/osascript</string>
+        <string>-e</string>
+        <string>do shell script "/bin/bash '/Users/andrew/Documents/Research/AI_workflows/INDD_dashboard/scripts/cron_refresh.sh' &gt;&gt;$HOME/Library/Logs/INDD_dashboard_refresh.out.log 2&gt;&gt;$HOME/Library/Logs/INDD_dashboard_refresh.err.log"</string>
     </array>
 
     <key>WorkingDirectory</key>
-    <string>/Users/andrew/Documents/Research/AI workflows/INDD_dashboard</string>
+    <string>/Users/andrew/Documents/Research/AI_workflows/INDD_dashboard</string>
 
     <key>StartCalendarInterval</key>
     <dict>

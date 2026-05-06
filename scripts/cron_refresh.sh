@@ -22,7 +22,7 @@ set -o pipefail
 # launchd's PATH is minimal; restore the tools we need.
 export PATH="/usr/local/bin:/opt/homebrew/bin:/Library/Frameworks/Python.framework/Versions/3.13/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
-PROJECT_DIR="/Users/andrew/Documents/Research/AI workflows/INDD_dashboard"
+PROJECT_DIR="/Users/andrew/Documents/Research/AI_workflows/INDD_dashboard"
 LOG_FILE="$HOME/Library/Logs/INDD_dashboard_refresh.log"
 RUN_ID="$(date '+%Y-%m-%dT%H:%M:%S')"
 

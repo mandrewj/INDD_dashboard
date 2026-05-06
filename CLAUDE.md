@@ -43,7 +43,7 @@ Two paths, both detailed in README:
 - `npm run refresh:gbif` — submits a fresh GBIF download (needs `.env` with credentials), polls until ready, drops the TSV into `data/`, updates `lib/citation.ts`.
 - `npm run build:data` — rebuilds `public/data/` JSON bundle from `data/IN_data.txt`.
 
-A weekly launchd cron is wired up (`scripts/launchd/`); a manual refresh is rarely needed.
+A weekly launchd cron is wired up: `scripts/cron_refresh.sh` is invoked by `scripts/com.iddl.indd-dashboard-refresh.plist` (installed at `~/Library/LaunchAgents/`) every Monday at 05:00. Two macOS quirks the plist works around — both because the project lives in iCloud-synced `~/Documents/`: (1) `/bin/bash` must be granted Full Disk Access in System Settings → Privacy & Security, or runs fail with `Operation not permitted` (exit 126); (2) the plist invokes bash via `osascript -e 'do shell script "..."'` rather than spawning `/bin/bash` directly, because launchd-spawned bash hits `mmap: Resource deadlock avoided` against the iCloud FileProvider extension on `.env` reads and `git commit`. Don't revert that wrapper. Logs land in `~/Library/Logs/INDD_dashboard_refresh.{out,err,}.log`. A manual refresh is rarely needed.
 
 ## Architectural rules of thumb
 
