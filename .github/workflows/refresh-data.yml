@@ -1,0 +1,62 @@
+name: Weekly GBIF data refresh
+
+on:
+  schedule:
+    # Mondays 09:00 UTC ≈ 5am EDT / 4am EST. GitHub may delay scheduled
+    # runs under load; manual workflow_dispatch always works.
+    - cron: "0 9 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: refresh-data
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    # GBIF occurrence-download requests take 5–60 min to ready; padding to 2 h.
+    timeout-minutes: 120
+    env:
+      GBIF_USER: ${{ secrets.GBIF_USER }}
+      GBIF_PASSWORD: ${{ secrets.GBIF_PASSWORD }}
+      GBIF_NOTIFY_EMAIL: ${{ secrets.GBIF_NOTIFY_EMAIL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Refresh GBIF data
+        # Poll every 2 min in CI (script default is 10 min for local runs).
+        run: python3 scripts/refresh_gbif_data.py --poll-seconds 120
+
+      - name: Build static data bundle
+        run: npm run build:data
+
+      - name: Commit and push data changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          STAGEABLE="lib/citation.ts public/data/dictionaries.json public/data/records.json public/data/precomputed.json"
+          git add $STAGEABLE
+          if git diff --cached --quiet; then
+            echo "no data changes — skipping commit"
+            exit 0
+          fi
+          DOI=$(grep -oE '"10\.[0-9]+/[a-z0-9.]+"' lib/citation.ts | head -1 | tr -d '"')
+          git commit -m "Auto-refresh GBIF data to ${DOI:-unknown DOI}"
+          git push
