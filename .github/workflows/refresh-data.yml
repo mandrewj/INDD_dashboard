@@ -2,9 +2,9 @@ name: Weekly GBIF data refresh
 
 on:
   schedule:
-    # Mondays 09:00 UTC ≈ 5am EDT / 4am EST. GitHub may delay scheduled
-    # runs under load; manual workflow_dispatch always works.
-    - cron: "0 9 * * 1"
+    # Mondays + Thursdays 09:00 UTC ≈ 5am EDT / 4am EST. GitHub may
+    # delay scheduled runs under load; manual workflow_dispatch always works.
+    - cron: "0 9 * * 1,4"
   workflow_dispatch:
 
 permissions:
