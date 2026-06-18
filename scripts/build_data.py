@@ -25,6 +25,7 @@ Decisions reflected here (confirmed with user):
 
 from __future__ import annotations
 
+import csv
 import json
 import math
 import time
@@ -85,6 +86,11 @@ def encode_dict(values: list[str | None]) -> tuple[dict[str | None, int], list[s
 def main() -> None:
     t0 = time.time()
     print(f"Loading {TSV} …")
+    # GBIF SIMPLE_CSV is a pure tab-delimited dump with NO field quoting:
+    # a literal `"` in text columns (e.g. scientificName authorship) is data,
+    # not a quote char. Left at pandas' default (quotechar='"'), a single stray
+    # quote flips the parser into quote mode and it swallows tabs/newlines until
+    # the next `"`, shifting every downstream column. QUOTE_NONE disables that.
     df = pd.read_csv(
         TSV,
         sep="\t",
@@ -92,6 +98,7 @@ def main() -> None:
         keep_default_na=False,
         na_values=[""],
         low_memory=False,
+        quoting=csv.QUOTE_NONE,
         on_bad_lines="warn",
     )
     print(f"  {len(df):,} rows in {time.time()-t0:.1f}s")
