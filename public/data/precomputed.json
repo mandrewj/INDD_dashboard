@@ -1,9 +1,9 @@
 {
-  "totalRecords":404371,
-  "uniqueSpecies":8984,
+  "totalRecords":404438,
+  "uniqueSpecies":8985,
   "uniqueFamilies":537,
   "uniqueCountiesObserved":92,
-  "shannonDiversityUnfiltered":6.699103,
+  "shannonDiversityUnfiltered":6.699409,
   "yearObservedMin":1880,
   "yearObservedMax":2026,
   "yearFilterFloor":1880,
@@ -12,7 +12,7 @@
   "recordsWithoutCounty":62531,
   "recordsWithoutYear":10701,
   "recordsWithoutMonth":38189,
-  "recordsWithoutSpecies":27744,
+  "recordsWithoutSpecies":27773,
   "recordsOutOfBboxCoords":263,
   "recordsYearOutOfRange":12
 }
