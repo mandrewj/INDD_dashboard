@@ -1,6 +1,8 @@
 "use client";
 
-import { X } from "lucide-react";
+import { useState } from "react";
+import { Check, Link2, X } from "lucide-react";
+import { shareUrl } from "@/lib/embed";
 import { useLoadedData } from "@/lib/dataContext";
 import { useFilters } from "@/lib/filterContext";
 import { dictLabel, isFilterActive } from "@/lib/filtering";
@@ -14,14 +16,15 @@ export function ActiveFilterChips() {
     setOrder,
     setFamily,
     setGenus,
+    setSpecies,
     setCounty,
     setYearRange,
     setIncludeNullYear,
     reset,
+    params,
   } = useFilters();
 
   const active = isFilterActive(filters, yearFloor, yearCeil);
-  if (!active) return null;
 
   const chips: Array<{ key: string; label: string; clear: () => void }> = [];
 
@@ -44,6 +47,13 @@ export function ActiveFilterChips() {
       key: "genus",
       label: `Genus: ${dictLabel(dictionaries.genus, filters.genusId)}`,
       clear: () => setGenus(null),
+    });
+  }
+  if (filters.speciesId !== null) {
+    chips.push({
+      key: "species",
+      label: `Species: ${dictLabel(dictionaries.species, filters.speciesId)}`,
+      clear: () => setSpecies(null),
     });
   }
   if (filters.countyId !== null) {
@@ -83,13 +93,51 @@ export function ActiveFilterChips() {
           <span className="sr-only">Clear</span>
         </button>
       ))}
-      <button
-        type="button"
-        onClick={reset}
-        className="text-xs text-moss-700 underline-offset-2 hover:underline"
-      >
-        Clear all
-      </button>
+      {active ? (
+        <button
+          type="button"
+          onClick={reset}
+          className="text-xs text-moss-700 underline-offset-2 hover:underline"
+        >
+          Clear all
+        </button>
+      ) : (
+        <span className="text-xs text-moss-600">
+          Showing all Indiana insect records. Pick a taxon, county, or years to focus.
+        </span>
+      )}
+      <CopyLink url={() => shareUrl(params)} />
     </div>
+  );
+}
+
+function CopyLink({ url }: { url: () => string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={async () => {
+        const u = url();
+        try {
+          await navigator.clipboard.writeText(u);
+        } catch {
+          // Clipboard can be blocked inside iframes without the
+          // clipboard-write permission; fall back to a prompt-free copy.
+          const ta = document.createElement("textarea");
+          ta.value = u;
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand("copy");
+          ta.remove();
+        }
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      }}
+      title="Copy a link to this exact view"
+      className="ml-auto inline-flex items-center gap-1.5 rounded-md border border-forest-200 bg-cream-50 px-2.5 py-1 text-xs text-forest-700 hover:bg-cream-100"
+    >
+      {copied ? <Check className="h-3.5 w-3.5" aria-hidden /> : <Link2 className="h-3.5 w-3.5" aria-hidden />}
+      {copied ? "Link copied" : "Copy link to this view"}
+    </button>
   );
 }

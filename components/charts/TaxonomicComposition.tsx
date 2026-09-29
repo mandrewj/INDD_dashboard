@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import { ResponsiveContainer, Tooltip, Treemap } from "recharts";
 import { useLoadedData } from "@/lib/dataContext";
-import { useFilteredRecords } from "@/lib/filterContext";
+import { useFilteredRecords, useFilters } from "@/lib/filterContext";
 import { FIELD } from "@/lib/types";
 import { ChartCard } from "./ChartCard";
 
@@ -29,6 +29,9 @@ interface FamilyLeaf {
   color: string;
   orderName: string;
   pct: number; // of all records on the chart
+  /** Dictionary ids for click-to-filter; null for pooled "Other" tiles. */
+  orderId: number | null;
+  familyId: number | null;
 }
 
 interface OrderNode {
@@ -41,6 +44,7 @@ interface OrderNode {
 export function TaxonomicComposition() {
   const { dictionaries } = useLoadedData();
   const filtered = useFilteredRecords();
+  const { setTaxon } = useFilters();
 
   const { tree, totalShown, totalAll, ordersOmitted, familiesOmitted } =
     useMemo(() => buildTree(filtered, dictionaries), [filtered, dictionaries]);
@@ -51,8 +55,8 @@ export function TaxonomicComposition() {
       subtitle={
         <>
           {totalShown.toLocaleString()} of {totalAll.toLocaleString()} records
-          {" "}grouped by order → family. Top {TOP_ORDERS} orders shown; smaller
-          orders pooled into <span className="text-bark-500">Other orders</span>.
+          {" "}grouped by order → family. Area is proportional to records, not
+          species. Click a tile to filter.
         </>
       }
       caveat={
@@ -79,12 +83,19 @@ export function TaxonomicComposition() {
                   fill: c.color,
                   orderName: c.orderName,
                   pct: c.pct,
+                  orderId: c.orderId,
+                  familyId: c.familyId,
                 })),
               }))}
               dataKey="size"
               isAnimationActive={false}
               stroke="#FFFFFF"
               content={<TreemapCell />}
+              onClick={(node: unknown) => {
+                const n = node as { orderId?: number | null; familyId?: number | null };
+                if (n.orderId == null) return;
+                setTaxon({ orderId: n.orderId, familyId: n.familyId ?? null, genusId: null, speciesId: null });
+              }}
             >
               <Tooltip content={<TreemapTooltip />} />
             </Treemap>
@@ -174,6 +185,8 @@ function buildTree(
       color: lighten(baseColor, j / Math.max(1, TOP_FAMILIES_PER_ORDER) * 0.45),
       orderName,
       pct: 0, // assigned after totalShown known
+      orderId: entry.oId,
+      familyId: f.fId === 0 ? null : f.fId,
     }));
     if (restFamTotal > 0) {
       children.push({
@@ -182,6 +195,8 @@ function buildTree(
         color: lighten(baseColor, 0.55),
         orderName,
         pct: 0,
+        orderId: entry.oId,
+        familyId: null,
       });
     }
 
@@ -209,6 +224,8 @@ function buildTree(
           color: OTHER_COLOR,
           orderName: "Other orders",
           pct: 0,
+          orderId: null,
+          familyId: null,
         },
       ],
     });
@@ -292,6 +309,7 @@ function TreemapCell(props: unknown) {
         fill={fill}
         stroke="#FFFFFF"
         strokeWidth={1}
+        style={{ cursor: "pointer" }}
       />
       {showLabel ? (
         <text
@@ -339,6 +357,7 @@ function TreemapTooltip({ active, payload }: { active?: boolean; payload?: Toolt
         {(p.size ?? 0).toLocaleString()} records
         <span className="ml-2 text-moss-600">({(p.pct ?? 0).toFixed(1)}%)</span>
       </div>
+      <div className="mt-1 text-[10px] text-moss-500">Click to filter</div>
     </div>
   );
 }

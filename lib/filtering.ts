@@ -5,6 +5,7 @@ export interface FilterState {
   orderId: number | null;
   familyId: number | null;
   genusId: number | null;
+  speciesId: number | null;
   /** Dictionary id; 0 = "Unknown county" bucket; null = all (incl. unknown). */
   countyId: number | null;
   yearMin: number;
@@ -20,6 +21,7 @@ export function createInitialFilterState(
     orderId: null,
     familyId: null,
     genusId: null,
+    speciesId: null,
     countyId: null,
     yearMin: yearFloor,
     yearMax: yearCeil,
@@ -32,6 +34,7 @@ export function recordPasses(r: RecordTuple, f: FilterState): boolean {
   if (f.orderId !== null && r[FIELD.ORDER] !== f.orderId) return false;
   if (f.familyId !== null && r[FIELD.FAMILY] !== f.familyId) return false;
   if (f.genusId !== null && r[FIELD.GENUS] !== f.genusId) return false;
+  if (f.speciesId !== null && r[FIELD.SPECIES] !== f.speciesId) return false;
   if (f.countyId !== null && r[FIELD.COUNTY] !== f.countyId) return false;
   const y = r[FIELD.YEAR];
   if (y === null) {
@@ -68,23 +71,30 @@ export function applyFilters(
 export interface DependentOptions {
   familyIds: Set<number>;
   genusIds: Set<number>;
+  /** Species present under the active genus (empty when no genus is set). */
+  speciesIds: Set<number>;
 }
 
 export function computeDependentOptions(
   records: readonly RecordTuple[],
   orderId: number | null,
   familyId: number | null,
+  genusId: number | null = null,
 ): DependentOptions {
   const familyIds = new Set<number>();
   const genusIds = new Set<number>();
+  const speciesIds = new Set<number>();
   for (let i = 0; i < records.length; i++) {
     const r = records[i]!;
     if (orderId !== null && r[FIELD.ORDER] !== orderId) continue;
     familyIds.add(r[FIELD.FAMILY]);
     if (familyId !== null && r[FIELD.FAMILY] !== familyId) continue;
     genusIds.add(r[FIELD.GENUS]);
+    if (genusId !== null && r[FIELD.GENUS] === genusId && r[FIELD.SPECIES] !== 0) {
+      speciesIds.add(r[FIELD.SPECIES]);
+    }
   }
-  return { familyIds, genusIds };
+  return { familyIds, genusIds, speciesIds };
 }
 
 /** Build a sorted list of {id, label, count} for a dictionary, restricted
@@ -122,6 +132,7 @@ export function isFilterActive(f: FilterState, yearFloor: number, yearCeil: numb
     f.orderId !== null ||
     f.familyId !== null ||
     f.genusId !== null ||
+    f.speciesId !== null ||
     f.countyId !== null ||
     f.yearMin !== yearFloor ||
     f.yearMax !== yearCeil ||

@@ -41,3 +41,26 @@ export function pielouEvenness(h: number, s: number): number {
   if (s < 2) return Number.NaN;
   return h / Math.log(s);
 }
+
+/**
+ * Records-per-species abundance vector (dense, indexed by species id; id 0 =
+ * unidentified is left at 0). The input format for lib/inext.
+ */
+export function speciesAbundances(
+  records: readonly RecordTuple[],
+  speciesCount: number,
+): Int32Array {
+  const out = new Int32Array(speciesCount);
+  for (let i = 0; i < records.length; i++) {
+    const sp = records[i]![FIELD.SPECIES];
+    if (sp !== 0) out[sp] = out[sp]! + 1;
+  }
+  return out;
+}
+
+/** Abundance vector with the zero entries dropped (compact, for export). */
+export function nonZero(counts: Int32Array): number[] {
+  const out: number[] = [];
+  for (let i = 0; i < counts.length; i++) if (counts[i]! > 0) out.push(counts[i]!);
+  return out;
+}

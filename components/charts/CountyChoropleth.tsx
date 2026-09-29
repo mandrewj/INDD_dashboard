@@ -5,18 +5,21 @@ import {
   useLoadedData,
   type CountyFeature,
 } from "@/lib/dataContext";
-import { useFilteredRecords, useFilters } from "@/lib/filterContext";
+import { useFilteredRecordsExceptCounty, useFilters } from "@/lib/filterContext";
+import { freqTable, sampleCoverage } from "@/lib/inext";
 import { viridis } from "@/lib/colorscale";
 import { FIELD } from "@/lib/types";
-import { ChartCard } from "./ChartCard";
+import { ChartCard, Toggle } from "./ChartCard";
 
-type Metric = "species" | "observations";
+type Metric = "species" | "observations" | "coverage";
 
 interface CountyStats {
   /** county name (from geojson, matches dictionary label) */
   name: string;
   observations: number;
   species: number;
+  /** Sample coverage Ĉ of the county's records (0–1). */
+  coverage: number;
 }
 
 const VIEWBOX_W = 480;
@@ -25,14 +28,16 @@ const VIEWBOX_PAD = 16;
 
 export function CountyChoropleth() {
   const { counties, dictionaries } = useLoadedData();
-  const filtered = useFilteredRecords();
+  // All filters except county, so every county stays shaded (and
+  // comparable) while one is selected.
+  const filtered = useFilteredRecordsExceptCounty();
   const { filters, setCounty } = useFilters();
   const [metric, setMetric] = useState<Metric>("species");
   const [hovered, setHovered] = useState<string | null>(null);
 
   // ---- Aggregate filtered records by county name ----
-  const { statsByName, unmappedObs, unmappedSpecies, maxValue } = useMemo(() => {
-    const byName = new Map<string, { obs: number; species: Set<number> }>();
+  const { statsByName, unmappedObs, unmappedSpecies, minValue, maxValue } = useMemo(() => {
+    const byName = new Map<string, { obs: number; species: Map<number, number> }>();
     let unmappedObsCount = 0;
     const unmappedSp = new Set<number>();
     for (let i = 0; i < filtered.length; i++) {
@@ -47,28 +52,34 @@ export function CountyChoropleth() {
       const name = dictionaries.county[cId] ?? "(unknown)";
       let bucket = byName.get(name);
       if (!bucket) {
-        bucket = { obs: 0, species: new Set<number>() };
+        bucket = { obs: 0, species: new Map<number, number>() };
         byName.set(name, bucket);
       }
       bucket.obs++;
-      if (sp !== 0) bucket.species.add(sp);
+      if (sp !== 0) bucket.species.set(sp, (bucket.species.get(sp) ?? 0) + 1);
     }
     const stats = new Map<string, CountyStats>();
     let max = 0;
+    let min = Infinity;
     for (const [name, b] of byName) {
       const s: CountyStats = {
         name,
         observations: b.obs,
         species: b.species.size,
+        coverage: sampleCoverage(freqTable([...b.species.values()])),
       };
       stats.set(name, s);
-      const v = metric === "species" ? s.species : s.observations;
+      const v = metricValue(s, metric);
       if (v > max) max = v;
+      if (v < min) min = v;
     }
     return {
       statsByName: stats,
       unmappedObs: unmappedObsCount,
       unmappedSpecies: unmappedSp.size,
+      // Coverage is shown relative to its observed range (it clusters near
+      // 100%); counts are shown from zero.
+      minValue: metric === "coverage" && Number.isFinite(min) ? min : 0,
       maxValue: max,
     };
   }, [filtered, dictionaries.county, metric]);
@@ -85,13 +96,37 @@ export function CountyChoropleth() {
 
   return (
     <ChartCard
-      title="County species richness"
-      subtitle={
-        metric === "species"
-          ? "Each county shaded by the number of distinct species observed under the active filters."
-          : "Each county shaded by the number of observation records under the active filters."
+      title="Species by county"
+      subtitle={METRIC_SUBTITLE[metric]}
+      controls={
+        <Toggle
+          label="Map metric"
+          value={metric}
+          onChange={setMetric}
+          options={[
+            { value: "species", label: "Species" },
+            { value: "observations", label: "Records" },
+            { value: "coverage", label: "Completeness" },
+          ]}
+        />
       }
-      controls={<MetricToggle value={metric} onChange={setMetric} />}
+      explainer={
+        <>
+          <p>
+            <strong>Species</strong> and <strong>Records</strong> maps usually
+            look alike: counties with more records have more species. That is
+            mostly a map of where people collect (universities, parks, cities),
+            not of where insects are most diverse.
+          </p>
+          <p>
+            <strong>Completeness</strong> shades each county by sample coverage
+            (Ĉ = 1 − f₁/n, adjusted): the estimated share of that county’s
+            insect records belonging to species already found there. Dark
+            counties are the least complete inventories, where one more survey
+            would most likely add new species.
+          </p>
+        </>
+      }
       caveat={
         unmappedObs > 0 ? (
           <>
@@ -117,20 +152,17 @@ export function CountyChoropleth() {
           <svg
             viewBox={`0 0 ${VIEWBOX_W} ${VIEWBOX_H}`}
             role="img"
-            aria-label={`Choropleth map of Indiana counties shaded by ${metric === "species" ? "unique species count" : "observation count"}.`}
+            aria-label={`Choropleth map of Indiana counties shaded by ${METRIC_LABEL[metric].toLowerCase()}.`}
             className="w-full"
           >
-            <title>Indiana county map · {metric === "species" ? "species richness" : "observation count"}</title>
+            <title>Indiana county map · {METRIC_LABEL[metric]}</title>
             <g>
               {paths.map((p) => {
                 const stats = statsByName.get(p.name);
-                const value = stats
-                  ? metric === "species"
-                    ? stats.species
-                    : stats.observations
-                  : 0;
-                const t = maxValue > 0 ? value / maxValue : 0;
-                const fill = value === 0 ? "#F1F3F5" : viridis(t);
+                const value = stats ? metricValue(stats, metric) : 0;
+                const span = maxValue - minValue;
+                const t = span > 0 ? (value - minValue) / span : 1;
+                const fill = !stats || value === 0 ? "#F1F3F5" : viridis(t);
                 const isHovered = hovered === p.name;
                 const isSelected =
                   filters.countyId !== null &&
@@ -161,7 +193,7 @@ export function CountyChoropleth() {
                     }}
                     tabIndex={0}
                     role="button"
-                    aria-label={`${p.name} County: ${stats ? `${stats.species.toLocaleString()} species, ${stats.observations.toLocaleString()} observations` : "no records under current filters"}`}
+                    aria-label={`${p.name} County: ${stats ? `${stats.species.toLocaleString()} species, ${stats.observations.toLocaleString()} records, ${(100 * stats.coverage).toFixed(1)}% complete` : "no records under current filters"}`}
                     className="cursor-pointer outline-none transition-colors"
                   />
                 );
@@ -178,7 +210,7 @@ export function CountyChoropleth() {
         </div>
 
         <div className="flex flex-col gap-4">
-          <Legend max={maxValue} metric={metric} />
+          <Legend min={minValue} max={maxValue} metric={metric} />
           <Summary
             statsByName={statsByName}
             metric={metric}
@@ -192,39 +224,24 @@ export function CountyChoropleth() {
 
 // ---------------------------------------------------------------------------
 
-function MetricToggle({
-  value,
-  onChange,
-}: {
-  value: Metric;
-  onChange: (m: Metric) => void;
-}) {
-  return (
-    <div
-      role="group"
-      aria-label="Map metric"
-      className="inline-flex overflow-hidden rounded-md border border-forest-200 bg-cream-50 text-xs"
-    >
-      {(["species", "observations"] as const).map((m) => {
-        const active = m === value;
-        return (
-          <button
-            key={m}
-            type="button"
-            onClick={() => onChange(m)}
-            aria-pressed={active}
-            className={
-              active
-                ? "bg-forest-600 px-3 py-1.5 font-medium text-cream-50"
-                : "bg-transparent px-3 py-1.5 text-forest-700 hover:bg-cream-200"
-            }
-          >
-            {m === "species" ? "Species" : "Observations"}
-          </button>
-        );
-      })}
-    </div>
-  );
+const METRIC_LABEL: Record<Metric, string> = {
+  species: "Species",
+  observations: "Records",
+  coverage: "Completeness",
+};
+
+const METRIC_SUBTITLE: Record<Metric, string> = {
+  species: "Distinct species recorded in each county under the active filters. Click a county to filter.",
+  observations: "Number of occurrence records per county — a map of sampling effort. Click a county to filter.",
+  coverage: "Estimated inventory completeness (sample coverage) per county. Darker = more species likely still unrecorded.",
+};
+
+function metricValue(s: CountyStats, m: Metric): number {
+  return m === "species" ? s.species : m === "observations" ? s.observations : s.coverage;
+}
+
+function formatMetric(v: number, m: Metric): string {
+  return m === "coverage" ? `${(100 * v).toFixed(1)}%` : Math.round(v).toLocaleString();
 }
 
 function HoverTip({
@@ -244,8 +261,10 @@ function HoverTip({
         <dl className="mt-1.5 grid grid-cols-2 gap-x-3 gap-y-0.5 tabular-nums">
           <dt className="text-moss-600">Species</dt>
           <dd className="text-right">{stats.species.toLocaleString()}</dd>
-          <dt className="text-moss-600">Observations</dt>
+          <dt className="text-moss-600">Records</dt>
           <dd className="text-right">{stats.observations.toLocaleString()}</dd>
+          <dt className="text-moss-600">Completeness</dt>
+          <dd className="text-right">{formatMetric(stats.coverage, "coverage")}</dd>
         </dl>
       ) : (
         <div className="mt-1.5 text-moss-700">No records under current filters.</div>
@@ -255,16 +274,13 @@ function HoverTip({
   );
 }
 
-function Legend({ max, metric }: { max: number; metric: Metric }) {
+function Legend({ min, max, metric }: { min: number; max: number; metric: Metric }) {
   const stops = 9;
-  const ticks = useMemo(() => {
-    if (max === 0) return [0];
-    return [0, Math.round(max / 2), max];
-  }, [max]);
+  const ticks = max <= min ? [max] : [min, (min + max) / 2, max];
   return (
     <div>
       <div className="mb-1 text-[10px] uppercase tracking-wider text-moss-600">
-        {metric === "species" ? "Unique species" : "Observations"}
+        {METRIC_LABEL[metric]}
       </div>
       <div
         className="h-3 w-full rounded"
@@ -277,7 +293,7 @@ function Legend({ max, metric }: { max: number; metric: Metric }) {
       />
       <div className="mt-1 flex justify-between text-[10px] text-moss-700 tabular-nums">
         {ticks.map((t, i) => (
-          <span key={i}>{t.toLocaleString()}</span>
+          <span key={i}>{formatMetric(t, metric)}</span>
         ))}
       </div>
       <div className="mt-2 flex items-center gap-2 text-[10px] text-moss-700">
@@ -300,21 +316,23 @@ function Summary({
   metric: Metric;
   countyCount: number;
 }) {
+  // For completeness, list the *least* complete counties — the survey gaps.
+  const ascending = metric === "coverage";
   const top = useMemo(() => {
     return [...statsByName.values()]
-      .sort((a, b) => {
-        const av = metric === "species" ? a.species : a.observations;
-        const bv = metric === "species" ? b.species : b.observations;
-        return bv - av;
-      })
+      .sort((a, b) =>
+        ascending
+          ? metricValue(a, metric) - metricValue(b, metric)
+          : metricValue(b, metric) - metricValue(a, metric),
+      )
       .slice(0, 5);
-  }, [statsByName, metric]);
+  }, [statsByName, metric, ascending]);
 
   const observed = statsByName.size;
   return (
     <div className="rounded-md border border-forest-100 bg-cream-50 p-3">
       <div className="text-[10px] uppercase tracking-wider text-moss-600">
-        Top counties
+        {ascending ? "Least complete" : "Top counties"}
       </div>
       <div className="mt-1 text-[11px] text-bark-600">
         {observed.toLocaleString()} of {countyCount} counties have records
@@ -323,20 +341,17 @@ function Summary({
         <div className="mt-2 text-xs text-moss-700">No data.</div>
       ) : (
         <ol className="mt-2 space-y-1 text-xs text-bark-700">
-          {top.map((s, i) => {
-            const v = metric === "species" ? s.species : s.observations;
-            return (
-              <li key={s.name} className="flex items-baseline justify-between gap-2">
-                <span className="truncate">
-                  <span className="text-moss-600 tabular-nums">{i + 1}. </span>
-                  {s.name}
-                </span>
-                <span className="font-serif tabular-nums text-forest-700">
-                  {v.toLocaleString()}
-                </span>
-              </li>
-            );
-          })}
+          {top.map((s, i) => (
+            <li key={s.name} className="flex items-baseline justify-between gap-2">
+              <span className="truncate">
+                <span className="text-moss-600 tabular-nums">{i + 1}. </span>
+                {s.name}
+              </span>
+              <span className="font-serif tabular-nums text-forest-700">
+                {formatMetric(metricValue(s, metric), metric)}
+              </span>
+            </li>
+          ))}
         </ol>
       )}
     </div>

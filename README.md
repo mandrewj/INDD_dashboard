@@ -219,9 +219,13 @@ keeps `output` unset so Vercel's image optimizer handles the small icons.
 │   ├── ActiveFilterChips.tsx
 │   ├── SiteHeader.tsx
 │   └── charts/
-│       ├── ChartCard.tsx          # Shared card wrapper
-│       ├── CountyChoropleth.tsx   # SVG map, viridis fill, click-to-filter
-│       ├── ObservationsOverTime.tsx
+│       ├── ChartCard.tsx          # Card wrapper (+ "How to read this"), Toggle, shared chart styles
+│       ├── LinePlot.tsx           # Hand-rolled SVG line plot: CI bands, log axes, crosshair
+│       ├── CountyChoropleth.tsx   # SVG map (species / records / completeness), click-to-filter
+│       ├── SpeciesAccumulation.tsx # iNEXT rarefaction/extrapolation + Hill-number table
+│       ├── CountyEffort.tsx       # Records vs. species per county vs. statewide rarefaction
+│       ├── RankAbundance.tsx      # Whittaker plot (singletons/doubletons)
+│       ├── ObservationsOverTime.tsx # Records by source / species per year / discovery curve
 │       ├── TaxonomicComposition.tsx (Recharts Treemap)
 │       ├── SeasonalityHeatmap.tsx (custom SVG, drills into active filter)
 │       ├── TopSpeciesTable.tsx
@@ -232,10 +236,17 @@ keeps `output` unset so Vercel's image optimizer handles the small icons.
 │   ├── filtering.ts      # Pure filter + dependent-options logic
 │   ├── filterContext.tsx # Filter state + shared filtered-records context
 │   ├── dataContext.tsx   # Fetches the static data bundle once
-│   ├── diversity.ts      # Shannon H' + Pielou's J (with unit tests)
+│   ├── diversity.ts      # Shannon H', Pielou's J, abundance vectors
+│   ├── inext.ts          # TS port of iNEXT (Hill numbers, coverage, Chao1, bootstrap)
+│   ├── inext.worker.ts   # Runs iNEXT curves + bootstrap off the main thread
+│   ├── useInext.ts       # React hook around the worker
+│   ├── urlState.ts       # Filters ⇄ shareable URL params (by name)
+│   ├── embed.ts          # iframe glue: postMessage to insectid.org, share URLs
 │   ├── colorscale.ts     # Viridis interpolation
 │   ├── citation.ts       # GBIF DOI + URL builders
 │   └── inaturalist.ts    # Cached iNat taxon-id lookup
+├── wix/
+│   └── indiana-insects.page.js  # Velo page code for insectid.org (deep links)
 ├── scripts/
 │   ├── build_data.py            # Main pipeline (TSV → JSON bundle)
 │   ├── build_counties_geojson.py
@@ -250,6 +261,67 @@ keeps `output` unset so Vercel's image optimizer handles the small icons.
     ├── IN_data.txt       # Source TSV (gitignored)
     └── *.png/.gif        # Logo sources (copied into public/images)
 ```
+
+## Embedding in insectid.org & deep links
+
+The dashboard is embedded on <https://www.insectid.org/indiana-insects> as a
+Wix *Embed a site* element. Any view can be linked:
+
+```
+https://www.insectid.org/indiana-insects?taxon=Carabidae&county=Tippecanoe
+https://www.insectid.org/indiana-insects?taxon=Danaus+plexippus&from=2000
+https://www.insectid.org/indiana-insects?taxon=Odonata&county=unknown
+```
+
+| Param | Meaning |
+| ----- | ------- |
+| `taxon` | Order, family, genus, or species name (any rank; case-insensitive; `_` or `+` for spaces). Parents are filled in automatically. |
+| `order` / `family` / `genus` / `species` | Same, with an explicit rank |
+| `county` | County name (`Tippecanoe` or `Tippecanoe County`), or `unknown` |
+| `from`, `to` | Year range |
+| `noyear=0` | Exclude records without a year |
+
+Names, not ids, are used because dictionary ids change on every rebuild.
+The same params work directly on the Vercel URL.
+
+**How the params reach the iframe.** A cross-origin iframe can't read its
+parent's URL (the browser strips the referrer to the origin), so the Wix page
+needs a few lines of Velo code — `wix/indiana-insects.page.js`:
+
+1. In the Wix editor, turn on **Dev Mode**.
+2. Select the dashboard embed; in the Properties panel set its ID to
+   `dashboard`.
+3. Paste `wix/indiana-insects.page.js` into that page's code panel. Publish.
+
+The page code copies the page's query string onto the iframe `src`, and
+listens for `{source: "indd-dashboard", type: "filters"}` messages from the
+app to mirror filter changes back into the address bar. Without it, deep
+links still work on the Vercel URL, and the in-app **Copy link to this view**
+button always produces an `insectid.org/indiana-insects?…` link. Those links
+just won't pre-filter until the page code is installed.
+
+## Analytical views (for teaching)
+
+Each card has a collapsible **How to read this** with the method and a
+"try this" prompt, written for undergraduate courses and public workshops.
+
+- **KPIs**: observed vs. **Chao1-estimated** species (95% CI) and **sample
+  coverage**, so "how many species?" always comes with "how complete?".
+- **Species accumulation (iNEXT)**: rarefaction/extrapolation of Hill
+  numbers q = 0, 1, 2 by sample size or by coverage, plus the completeness
+  curve, with 50-replicate bootstrap bands. Compare by data source, by time
+  period, or selected county vs. rest of state. `lib/inext.ts` reproduces
+  iNEXT 3.0.2 to ≥6 significant figures (`lib/inext.test.ts` checks against
+  `spider$Girdled` values). The card exports curve CSVs and an abundance
+  vector plus an R snippet to rerun the analysis in iNEXT.
+- **Sampling effort vs. species**: county records vs. species on log–log
+  axes against the statewide rarefaction curve, which separates effort from
+  diversity.
+- **Rank–abundance**: the singleton/doubleton tail behind Chao1.
+- **Map → Completeness**: per-county sample coverage, which shows survey
+  gaps.
+- **Records through time**: by data source (specimens → iNaturalist era),
+  species per year, and a discovery curve.
 
 ## Architectural notes
 
@@ -267,6 +339,11 @@ keeps `output` unset so Vercel's image optimizer handles the small icons.
   - No taxonomic filter → top 14 orders
   - Order set → that order + top 10 families within it
   - Family or genus set → top 10 species in that group
+- **iNEXT runs in a Web Worker** (`lib/inext.worker.ts`): point estimates
+  return in tens of ms, bootstrap bands follow (~1 s for the full dataset).
+- **`useFilteredRecordsExceptCounty()`** is the filtered set with the
+  county dimension released. The map and county-effort chart use it so all
+  counties stay visible while one is selected.
 - **Species names link to** GBIF Indiana search (synchronous; we have the
   taxon key from the build) **and** iNaturalist (lazy lookup of the iNat
   taxon id, cached in `localStorage`).

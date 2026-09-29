@@ -9,9 +9,9 @@ const data = precomputed as Precomputed;
 export default function Home() {
   return (
     <div className="min-h-screen">
-      <SiteHeader precomputed={data} />
+      <SiteHeader />
 
-      <main className="mx-auto max-w-7xl px-6 py-8">
+      <main className="mx-auto max-w-7xl px-6 py-6">
         <Dashboard precomputed={data} />
 
         <DataGapsSection data={data} />
@@ -19,15 +19,20 @@ export default function Home() {
         <footer className="mt-12 border-t border-forest-100 pt-6 text-xs text-moss-600">
           <p className="font-serif text-sm text-forest-700">
             Created and curated by the{" "}
-            <span className="font-semibold">
+            <a
+              href="https://www.insectid.org"
+              className="font-semibold underline-offset-2 hover:underline"
+            >
               Insect Diversity and Diagnostics Lab
-            </span>{" "}
+            </a>{" "}
             in the Purdue University Department of Entomology.
           </p>
           <p className="mt-3">
             Data: GBIF Darwin Core occurrence export, filtered to Indiana / class
             Insecta. County boundaries: U.S. Census TIGER 2022 cartographic
-            boundary file (1:500k).
+            boundary file (1:500k). Rarefaction and extrapolation follow iNEXT
+            (Chao et al. 2014, <i>Ecological Monographs</i> 84:45–67; Hsieh, Ma
+            &amp; Chao 2016, <i>Methods Ecol. Evol.</i> 7:1451–1456).
           </p>
           <p className="mt-2">
             <span className="font-medium text-moss-700">Cite this data:</span>{" "}
@@ -49,19 +54,13 @@ export default function Home() {
 
 function DataGapsSection({ data }: { data: Precomputed }) {
   return (
-    <section
-      aria-labelledby="gaps-heading"
-      className="mt-10 nature-card nature-card-accent p-6"
-    >
-      <h2
-        id="gaps-heading"
-        className="leaf-rule font-serif text-lg font-semibold text-forest-800"
-      >
+    <section aria-labelledby="gaps-heading" className="mt-10 nature-card p-6">
+      <h2 id="gaps-heading" className="font-serif text-lg font-semibold text-forest-800">
         Known data gaps
       </h2>
-      <p className="mt-3 text-sm text-bark-600">
-        We surface missing values rather than fill them silently — the dataset
-        is messy in the ways field collections always are.
+      <p className="mt-2 text-sm text-bark-600">
+        Missing values are reported, not silently filled. Numbers are for the
+        whole dataset.
       </p>
       <ul className="mt-4 grid gap-2 text-sm text-bark-700 sm:grid-cols-2">
         <Gap n={data.recordsWithoutCounty} of={data.totalRecords} label="lack a derivable county (no usable coordinates)" />
@@ -69,7 +68,7 @@ function DataGapsSection({ data }: { data: Precomputed }) {
         <Gap n={data.recordsWithoutMonth} of={data.totalRecords} label="lack a month" />
         <Gap n={data.recordsWithoutSpecies} of={data.totalRecords} label="aren’t identified to species" />
         <Gap n={data.recordsOutOfBboxCoords} of={data.totalRecords} label="have coordinates outside the Indiana bbox" />
-        <Gap n={data.recordsYearOutOfRange} of={data.totalRecords} label="have years outside 1880–2026 (treated as unknown)" />
+        <Gap n={data.recordsYearOutOfRange} of={data.totalRecords} label={`have years outside ${data.yearFilterFloor}–${data.yearFilterCeil} (treated as unknown)`} />
       </ul>
     </section>
   );

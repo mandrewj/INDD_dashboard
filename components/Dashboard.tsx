@@ -8,6 +8,9 @@ import { FilterPanel } from "./FilterPanel";
 import { FilteredKpis } from "./FilteredKpis";
 import { ActiveFilterChips } from "./ActiveFilterChips";
 import { CountyChoropleth } from "./charts/CountyChoropleth";
+import { CountyEffort } from "./charts/CountyEffort";
+import { RankAbundance } from "./charts/RankAbundance";
+import { SpeciesAccumulation } from "./charts/SpeciesAccumulation";
 import { ObservationsOverTime } from "./charts/ObservationsOverTime";
 import { SeasonalityHeatmap } from "./charts/SeasonalityHeatmap";
 import { TaxonomicComposition } from "./charts/TaxonomicComposition";
@@ -26,7 +29,7 @@ function DashboardInner({ precomputed }: { precomputed: Precomputed }) {
   const data = useDataState();
 
   if (data.status === "loading") {
-    return <LoadingState />;
+    return <LoadingState total={precomputed.totalRecords} />;
   }
   if (data.status === "error") {
     return <ErrorState message={data.message} />;
@@ -95,22 +98,9 @@ function DashboardLayout({ precomputed }: { precomputed: Precomputed }) {
 
       {/* Main column */}
       <div className="min-w-0">
-        <section aria-labelledby="kpi-heading">
-          <div className="mb-5 flex items-baseline justify-between">
-            <h2
-              id="kpi-heading"
-              className="leaf-rule font-serif text-xl font-semibold text-forest-800"
-            >
-              At a glance
-            </h2>
-            <p className="text-xs uppercase tracking-wider text-moss-600">
-              Live · responds to filters
-            </p>
-          </div>
-
+        <section aria-label="Summary for the current filters">
           <ActiveFilterChips />
-
-          <div className="mt-4">
+          <div className="mt-3">
             <FilteredKpis
               unfilteredTotal={precomputed.totalRecords}
               totalCounties={precomputed.totalCountiesInIndiana}
@@ -118,11 +108,16 @@ function DashboardLayout({ precomputed }: { precomputed: Precomputed }) {
           </div>
         </section>
 
-        <div className="mt-8 grid grid-cols-1 gap-6">
+        <div className="mt-6 grid grid-cols-1 gap-6">
           <CountyChoropleth />
-          <TaxonomicComposition />
+          <SpeciesAccumulation />
+          <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+            <CountyEffort />
+            <RankAbundance />
+          </div>
           <ObservationsOverTime />
           <SeasonalityHeatmap />
+          <TaxonomicComposition />
           <TopSpeciesTable />
         </div>
       </div>
@@ -130,12 +125,12 @@ function DashboardLayout({ precomputed }: { precomputed: Precomputed }) {
   );
 }
 
-function LoadingState() {
+function LoadingState({ total }: { total: number }) {
   return (
     <div className="nature-card p-10 text-center">
       <div className="mx-auto h-8 w-8 animate-pulse rounded-full bg-forest-300" />
       <p className="mt-4 text-sm text-moss-700">
-        Loading 366,675 occurrence records (~15&nbsp;MB)…
+        Loading {total.toLocaleString()} occurrence records (~15&nbsp;MB)…
       </p>
       <p className="mt-1 text-xs text-bark-500">
         First load only — the file is cached after this.

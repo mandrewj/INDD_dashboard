@@ -20,6 +20,7 @@ export function FilterPanel() {
     setOrder,
     setFamily,
     setGenus,
+    setSpecies,
     setCounty,
     setYearRange,
     setIncludeNullYear,
@@ -31,11 +32,12 @@ export function FilterPanel() {
   const familyCounts = useMemo(() => countByField(records, FIELD.FAMILY), [records]);
   const genusCounts = useMemo(() => countByField(records, FIELD.GENUS), [records]);
   const countyCounts = useMemo(() => countByField(records, FIELD.COUNTY), [records]);
+  const speciesCounts = useMemo(() => countByField(records, FIELD.SPECIES), [records]);
 
   // Cascade: family options depend on selected order; genus on order+family.
   const dependent = useMemo(
-    () => computeDependentOptions(records, filters.orderId, filters.familyId),
-    [records, filters.orderId, filters.familyId],
+    () => computeDependentOptions(records, filters.orderId, filters.familyId, filters.genusId),
+    [records, filters.orderId, filters.familyId, filters.genusId],
   );
 
   const orderOptions = useMemo(
@@ -49,6 +51,10 @@ export function FilterPanel() {
   const genusOptions = useMemo(
     () => buildOptionList(dictionaries.genus, genusCounts, dependent.genusIds),
     [dictionaries.genus, genusCounts, dependent.genusIds],
+  );
+  const speciesOptions = useMemo(
+    () => buildOptionList(dictionaries.species, speciesCounts, dependent.speciesIds),
+    [dictionaries.species, speciesCounts, dependent.speciesIds],
   );
   const countyOptions = useMemo(
     () => buildOptionList(dictionaries.county, countyCounts, null),
@@ -100,6 +106,28 @@ export function FilterPanel() {
           filters.familyId === null ? "All genera" : "All genera in family"
         }
       />
+      {filters.genusId !== null || filters.speciesId !== null ? (
+        <SelectField
+          label="Species"
+          value={filters.speciesId}
+          onChange={setSpecies}
+          options={
+            // A species reached by deep link / table click may sit outside
+            // the genus cascade (e.g. no genus on some records): keep it listed.
+            filters.speciesId !== null && !dependent.speciesIds.has(filters.speciesId)
+              ? [
+                  {
+                    id: filters.speciesId,
+                    label: dictionaries.species[filters.speciesId] ?? "(unknown)",
+                    count: speciesCounts.get(filters.speciesId) ?? 0,
+                  },
+                  ...speciesOptions,
+                ]
+              : speciesOptions
+          }
+          placeholder="All species in genus"
+        />
+      ) : null}
       <SelectField
         label="County"
         value={filters.countyId}

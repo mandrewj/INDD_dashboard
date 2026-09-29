@@ -8,12 +8,9 @@ Next.js 14 App Router · TypeScript strict · Tailwind · Recharts · Python bui
 
 ## Deployment context
 
-Deployed as a **subdomain of insectid.org** (the lab's parent site). The header is intentionally split:
+Embedded as an iframe (Wix *Embed a site*) on **https://www.insectid.org/indiana-insects**, served from `indd-dashboard.vercel.app`. The parent page already shows the InsectID logo, nav, and title, so the app's header is deliberately just an h1 + one line, with no logo and no headline stats (KPIs cover those). Don't re-add them. The footer links back to insectid.org for standalone visitors.
 
-- **Logo** → external `<a href="https://insectid.org">` (full-page navigation back to parent)
-- **Title block** ("Field Guide…" + h1) → `<Link href="/">` (internal app reload)
-
-Don't merge these; they navigate to different sites by design. See `components/SiteHeader.tsx`.
+Deep links: `?taxon=&county=&from=&to=&noyear=0` (names, not ids; see `lib/urlState.ts`). The parent passes its query to the iframe via Velo page code in `wix/indiana-insects.page.js`. A cross-origin iframe cannot read the parent URL any other way, so don't try `document.referrer`. The app posts filter changes to `window.parent` (`lib/embed.ts`). `PARENT_PAGE_URL` there is what "Copy link" shares.
 
 ## Brand / palette
 
@@ -30,7 +27,7 @@ The `forest`/`moss`/`bark`/`cream` Tailwind keys are remapped to the insectid.or
 
 - `data/insectID.png` — original raster (black text, 1094×474, 2.31:1).
 - `data/insectID-brand.png` — recolored variant: text + magnifier outline forest-800, handle moss-300, beetle preserved. Reuse this on sibling apps when you need the brand-aligned mark.
-- `public/images/insectID.png` — what Next.js serves (currently the brand variant). To swap, copy the file you want from `data/` over this path.
+- `public/images/insectID.png` — the brand variant, kept for sibling apps; the dashboard itself no longer renders a logo (the insectid.org parent page does). To swap, copy the file you want from `data/` over this path.
 
 Sizing: the logo is **not square** (1094×474). Style with `h-14 w-auto sm:h-16` — never `w-X h-X`, which crushes the aspect ratio. Width/height props on `<Image>` should match intrinsic dimensions (1094×474) so Next computes the layout correctly.
 
@@ -47,7 +44,9 @@ A weekly refresh runs in GitHub Actions: `.github/workflows/refresh-data.yml` fi
 
 ## Architectural rules of thumb
 
-- All filtering is client-side; `useFilteredRecords()` runs the O(n) scan once per (records, filters) change and shares the result via context. New charts read from this context — don't re-filter inside individual charts.
+- All filtering is client-side; `useFilteredRecords()` runs the O(n) scan once per (records, filters) change and shares the result via context. New charts read from this context — don't re-filter inside individual charts. County-comparison views use `useFilteredRecordsExceptCounty()` (same context, county released).
+- Diversity math lives in `lib/inext.ts` (iNEXT port, tested against R iNEXT 3.0.2 output). Anything heavier than Chao1/coverage (curves, bootstrap) goes through the worker via `useInext()`, not on the main thread. If you change the estimators, regenerate reference values in R (`iNEXT(x, q=c(0,1,2), datatype="abundance", size=..., nboot=0)`) rather than loosening test tolerances.
+- Charts needing CI bands / log axes / multi-series crosshair use `components/charts/LinePlot.tsx`; simple bar/line charts stay on Recharts. Comparison series use `SERIES_COLORS` (Okabe-Ito subset, fixed order) with direct labels.
 - Records are dictionary-encoded positional tuples (`lib/types.ts` → `RecordTuple`). Decode through the dictionaries; don't introduce a parallel parsed shape.
 - County is derived at build time via point-in-polygon. ~83% resolve; the rest land in *Unknown / unmapped* and surface in the data-gaps panel — preserve that bucket, don't drop it.
 - Image cache fetches in `lib/dataContext.tsx` are versioned by a hash of `precomputed.json`, so any rebuild auto-busts CDN + browser caches. Don't add manual `?v=` query params.

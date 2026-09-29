@@ -3,7 +3,7 @@
 import { useDeferredValue, useMemo, useState } from "react";
 import { ArrowDown, ArrowUp, ArrowUpDown, Search } from "lucide-react";
 import { useLoadedData } from "@/lib/dataContext";
-import { useFilteredRecords } from "@/lib/filterContext";
+import { useFilteredRecords, useFilters } from "@/lib/filterContext";
 import { FIELD } from "@/lib/types";
 import { ChartCard } from "./ChartCard";
 import { GbifLink } from "./GbifLink";
@@ -11,6 +11,9 @@ import { InatLink } from "./InatLink";
 
 interface SpeciesRow {
   speciesId: number;
+  orderId: number;
+  familyId: number;
+  genusId: number;
   speciesName: string;
   familyName: string;
   /** GBIF speciesKey — null if missing (entries fall back to "speciesKey:N" labels). */
@@ -30,6 +33,7 @@ type PageOption = (typeof PAGE_OPTIONS)[number];
 export function TopSpeciesTable() {
   const { dictionaries } = useLoadedData();
   const filtered = useFilteredRecords();
+  const { filters, setTaxon } = useFilters();
 
   const [search, setSearch] = useState("");
   const deferredSearch = useDeferredValue(search);
@@ -47,6 +51,8 @@ export function TopSpeciesTable() {
       // Family is taken from the first record of each species. Pre-stable —
       // the GBIF taxon backbone generally has 1:1 species→family.
       familyId: number;
+      orderId: number;
+      genusId: number;
     }
     const buckets = new Map<number, Bucket>();
     for (let i = 0; i < filtered.length; i++) {
@@ -61,6 +67,8 @@ export function TopSpeciesTable() {
           firstYear: null,
           lastYear: null,
           familyId: r[FIELD.FAMILY],
+          orderId: r[FIELD.ORDER],
+          genusId: r[FIELD.GENUS],
         };
         buckets.set(sp, b);
       }
@@ -78,6 +86,9 @@ export function TopSpeciesTable() {
       const taxonKey = dictionaries.speciesKey[speciesId] ?? null;
       rows.push({
         speciesId,
+        orderId: b.orderId,
+        familyId: b.familyId,
+        genusId: b.genusId,
         speciesName: dictionaries.species[speciesId] ?? "(unknown)",
         familyName:
           b.familyId !== 0
@@ -144,7 +155,7 @@ export function TopSpeciesTable() {
 
   return (
     <ChartCard
-      title="Top species"
+      title="Species list"
       subtitle={
         <>
           {matchingSpecies.toLocaleString()}
@@ -165,7 +176,7 @@ export function TopSpeciesTable() {
           <PageSizeSelect value={pageSize} onChange={setPageSize} />
         </div>
       }
-      caveat="Each row aggregates filtered records keyed on GBIF speciesKey. Records not identified to species are excluded from this table."
+      caveat="Each row aggregates filtered records keyed on GBIF speciesKey. Records not identified to species are excluded. Click a name to filter the whole dashboard to that species."
     >
       <div className="overflow-x-auto">
         <table className="min-w-full text-sm">
@@ -230,7 +241,25 @@ export function TopSpeciesTable() {
                   </td>
                   <td className="px-2 py-2 font-serif text-bark-700">
                     <span className="inline-flex flex-wrap items-baseline gap-x-0.5">
-                      <span className="italic">{r.speciesName}</span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setTaxon(
+                            filters.speciesId === r.speciesId
+                              ? { orderId: null, familyId: null, genusId: null, speciesId: null }
+                              : {
+                                  orderId: r.orderId || null,
+                                  familyId: r.familyId || null,
+                                  genusId: r.genusId || null,
+                                  speciesId: r.speciesId,
+                                },
+                          )
+                        }
+                        title={`Filter dashboard to ${r.speciesName}`}
+                        className="text-left italic underline-offset-2 hover:text-forest-700 hover:underline"
+                      >
+                        {r.speciesName}
+                      </button>
                       {r.gbifTaxonKey !== null ? (
                         <GbifLink
                           taxonKey={r.gbifTaxonKey}

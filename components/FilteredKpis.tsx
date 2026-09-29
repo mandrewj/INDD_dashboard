@@ -1,9 +1,10 @@
 "use client";
 
 import { useMemo } from "react";
-import { Boxes, Bug, Calendar, Map, Search, Sigma } from "lucide-react";
+import { useLoadedData } from "@/lib/dataContext";
 import { useFilteredRecords } from "@/lib/filterContext";
-import { shannonForRecords } from "@/lib/diversity";
+import { speciesAbundances } from "@/lib/diversity";
+import { chao1, freqTable, sampleCoverage } from "@/lib/inext";
 import { FIELD } from "@/lib/types";
 
 export function FilteredKpis({
@@ -13,98 +14,86 @@ export function FilteredKpis({
   unfilteredTotal: number;
   totalCounties: number;
 }) {
+  const { dictionaries } = useLoadedData();
   const filtered = useFilteredRecords();
 
   const stats = useMemo(() => {
-    const speciesSet = new Set<number>();
     const familySet = new Set<number>();
     const countySet = new Set<number>();
-    let yearMin = Infinity;
-    let yearMax = -Infinity;
-    let withYear = 0;
     for (let i = 0; i < filtered.length; i++) {
       const r = filtered[i]!;
-      if (r[FIELD.SPECIES] !== 0) speciesSet.add(r[FIELD.SPECIES]);
       if (r[FIELD.FAMILY] !== 0) familySet.add(r[FIELD.FAMILY]);
       if (r[FIELD.COUNTY] !== 0) countySet.add(r[FIELD.COUNTY]);
-      const y = r[FIELD.YEAR];
-      if (y !== null) {
-        withYear++;
-        if (y < yearMin) yearMin = y;
-        if (y > yearMax) yearMax = y;
-      }
     }
+    const t = freqTable(speciesAbundances(filtered, dictionaries.species.length));
     return {
       total: filtered.length,
-      species: speciesSet.size,
+      identified: t.n,
+      species: t.S,
+      chao: chao1(t),
+      coverage: sampleCoverage(t),
       families: familySet.size,
       counties: countySet.size,
-      yearLabel: withYear === 0 ? "—" : `${yearMin}–${yearMax}`,
-      shannon: shannonForRecords(filtered),
     };
-  }, [filtered]);
+  }, [filtered, dictionaries.species.length]);
 
   const pct = unfilteredTotal > 0 ? (100 * stats.total) / unfilteredTotal : 0;
+  const idPct = stats.total > 0 ? (100 * stats.identified) / stats.total : 0;
+  const hasSp = stats.species > 0;
 
   return (
-    <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
+    <dl className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
       <Kpi
-        icon={<Search className="h-4 w-4" />}
-        label="Observations"
+        label="Records"
         value={stats.total.toLocaleString()}
-        sublabel={`${pct.toFixed(1)}% of total`}
+        sublabel={`${pct.toFixed(1)}% of all · ${idPct.toFixed(0)}% to species`}
+      />
+      <Kpi label="Species observed" value={stats.species.toLocaleString()} />
+      <Kpi
+        label="Estimated species"
+        title="Chao1 lower-bound estimate of total richness, with 95% CI"
+        value={hasSp ? Math.round(stats.chao.estimate).toLocaleString() : "—"}
+        sublabel={
+          hasSp
+            ? `95% CI ${Math.round(stats.chao.lower).toLocaleString()}–${Math.round(stats.chao.upper).toLocaleString()} (Chao1)`
+            : undefined
+        }
       />
       <Kpi
-        icon={<Bug className="h-4 w-4" />}
-        label="Species"
-        value={stats.species.toLocaleString()}
+        label="Sample completeness"
+        title="Sample coverage Ĉ: estimated share of all records that belong to species already detected"
+        value={hasSp ? `${(100 * stats.coverage).toFixed(1)}%` : "—"}
+        sublabel={
+          hasSp
+            ? `${Math.max(0, Math.round(stats.chao.estimate - stats.species)).toLocaleString()} species likely unseen`
+            : undefined
+        }
       />
-      <Kpi
-        icon={<Boxes className="h-4 w-4" />}
-        label="Families"
-        value={stats.families.toLocaleString()}
-      />
-      <Kpi
-        icon={<Map className="h-4 w-4" />}
-        label="Counties"
-        value={`${stats.counties} / ${totalCounties}`}
-      />
-      <Kpi
-        icon={<Calendar className="h-4 w-4" />}
-        label="Year range"
-        value={stats.yearLabel}
-      />
-      <Kpi
-        icon={<Sigma className="h-4 w-4" />}
-        label="Shannon (H′)"
-        value={stats.shannon === 0 ? "—" : stats.shannon.toFixed(3)}
-      />
-    </div>
+      <Kpi label="Families" value={stats.families.toLocaleString()} />
+      <Kpi label="Counties" value={`${stats.counties} / ${totalCounties}`} />
+    </dl>
   );
 }
 
 function Kpi({
-  icon,
   label,
   value,
   sublabel,
+  title,
 }: {
-  icon: React.ReactNode;
   label: string;
   value: string;
   sublabel?: string;
+  title?: string;
 }) {
   return (
-    <div className="nature-card nature-card-accent p-4">
-      <div className="flex items-center gap-2 text-moss-600">
-        <span aria-hidden>{icon}</span>
-        <span className="text-[10px] uppercase tracking-[0.16em]">{label}</span>
-      </div>
-      <div className="mt-2 font-serif text-2xl font-semibold tabular-nums text-forest-800">
+    <div className="nature-card px-4 py-3" title={title}>
+      <dt className="text-[10px] uppercase tracking-[0.14em] text-moss-600">{label}</dt>
+      <dd className="mt-1 font-serif text-2xl font-semibold tabular-nums text-forest-800">
         {value}
-      </div>
+      </dd>
       {sublabel ? (
-        <div className="mt-0.5 text-[11px] text-moss-600 tabular-nums">{sublabel}</div>
+        <dd className="mt-0.5 text-[11px] leading-snug text-moss-600 tabular-nums">{sublabel}</dd>
       ) : null}
     </div>
   );
