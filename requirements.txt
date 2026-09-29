@@ -1,2 +1,7 @@
-pandas
-shapely
+# Data pipeline (scripts/build_data.py, scripts/refresh_gbif_data.py).
+# Majors pinned to what the weekly CI refresh runs successfully
+# (pandas 3.0.x, shapely 2.1.x as of 2026-09); bump deliberately.
+pandas>=2.2,<4
+shapely>=2.0,<3
+# Only for scripts/build_counties_geojson.py (one-time county boundaries).
+pyshp>=2.3,<4

@@ -125,21 +125,28 @@ function buildTree(
   ordersOmitted: number;
   familiesOmitted: number;
 } {
-  // Order id → (family id → count)
-  const byOrder = new Map<number, Map<number, number>>();
+  // Order × family counts in one flat typed array (orders ≈ 30, families
+  // ≈ 540 → ~16k cells), then collected into order id → (family id → count).
+  const nO = dictionaries.order.length;
+  const nF = dictionaries.family.length;
+  const grid = new Int32Array(nO * nF);
   let totalAll = 0;
   for (let i = 0; i < records.length; i++) {
     const r = records[i]!;
     const oId = r[FIELD.ORDER] as number;
-    const fId = r[FIELD.FAMILY] as number;
     if (oId === 0) continue; // skip uncategorized order
     totalAll++;
-    let m = byOrder.get(oId);
-    if (!m) {
-      m = new Map<number, number>();
-      byOrder.set(oId, m);
+    grid[oId * nF + (r[FIELD.FAMILY] as number)]!++;
+  }
+  const byOrder = new Map<number, Map<number, number>>();
+  for (let o = 1; o < nO; o++) {
+    for (let f = 0; f < nF; f++) {
+      const n = grid[o * nF + f]!;
+      if (n === 0) continue;
+      let m = byOrder.get(o);
+      if (!m) byOrder.set(o, (m = new Map<number, number>()));
+      m.set(f, n);
     }
-    m.set(fId, (m.get(fId) ?? 0) + 1);
   }
 
   // Sort orders by total descending, take top N

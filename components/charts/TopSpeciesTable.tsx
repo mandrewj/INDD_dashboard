@@ -43,66 +43,61 @@ export function TopSpeciesTable() {
 
   // Aggregate by speciesId. Skip unidentified (id 0).
   const allRows = useMemo<SpeciesRow[]>(() => {
-    interface Bucket {
-      observations: number;
-      counties: Set<number>;
-      firstYear: number | null;
-      lastYear: number | null;
-      // Family is taken from the first record of each species. Pre-stable —
-      // the GBIF taxon backbone generally has 1:1 species→family.
-      familyId: number;
-      orderId: number;
-      genusId: number;
-    }
-    const buckets = new Map<number, Bucket>();
+    // Typed arrays indexed by species id (one pass, no per-record Map/Set).
+    // Order/family/genus come from each species' first record — the GBIF
+    // backbone gives a 1:1 species → family mapping.
+    const nSp = dictionaries.species.length;
+    const nC = dictionaries.county.length;
+    const count = new Int32Array(nSp);
+    const nCounties = new Int32Array(nSp);
+    const seenCounty = new Uint8Array(nSp * nC);
+    const firstYear = new Int32Array(nSp).fill(0x7fffffff);
+    const lastYear = new Int32Array(nSp).fill(-1);
+    const orderOf = new Int32Array(nSp);
+    const familyOf = new Int32Array(nSp);
+    const genusOf = new Int32Array(nSp);
     for (let i = 0; i < filtered.length; i++) {
       const r = filtered[i]!;
       const sp = r[FIELD.SPECIES];
       if (sp === 0) continue;
-      let b = buckets.get(sp);
-      if (!b) {
-        b = {
-          observations: 0,
-          counties: new Set<number>(),
-          firstYear: null,
-          lastYear: null,
-          familyId: r[FIELD.FAMILY],
-          orderId: r[FIELD.ORDER],
-          genusId: r[FIELD.GENUS],
-        };
-        buckets.set(sp, b);
+      if (count[sp]!++ === 0) {
+        orderOf[sp] = r[FIELD.ORDER];
+        familyOf[sp] = r[FIELD.FAMILY];
+        genusOf[sp] = r[FIELD.GENUS];
       }
-      b.observations++;
       const c = r[FIELD.COUNTY];
-      if (c !== 0) b.counties.add(c);
+      if (c !== 0 && seenCounty[sp * nC + c] === 0) {
+        seenCounty[sp * nC + c] = 1;
+        nCounties[sp]!++;
+      }
       const y = r[FIELD.YEAR];
       if (y !== null) {
-        if (b.firstYear === null || y < b.firstYear) b.firstYear = y;
-        if (b.lastYear === null || y > b.lastYear) b.lastYear = y;
+        if (y < firstYear[sp]!) firstYear[sp] = y;
+        if (y > lastYear[sp]!) lastYear[sp] = y;
       }
     }
     const rows: SpeciesRow[] = [];
-    for (const [speciesId, b] of buckets) {
+    for (let speciesId = 1; speciesId < nSp; speciesId++) {
+      if (count[speciesId] === 0) continue;
       const taxonKey = dictionaries.speciesKey[speciesId] ?? null;
+      const familyId = familyOf[speciesId]!;
+      const hasYear = lastYear[speciesId]! >= 0;
       rows.push({
         speciesId,
-        orderId: b.orderId,
-        familyId: b.familyId,
-        genusId: b.genusId,
+        orderId: orderOf[speciesId]!,
+        familyId,
+        genusId: genusOf[speciesId]!,
         speciesName: dictionaries.species[speciesId] ?? "(unknown)",
-        familyName:
-          b.familyId !== 0
-            ? (dictionaries.family[b.familyId] ?? "(unknown)")
-            : "—",
+        familyName: familyId !== 0 ? (dictionaries.family[familyId] ?? "(unknown)") : "—",
         gbifTaxonKey: typeof taxonKey === "number" && taxonKey > 0 ? taxonKey : null,
-        observations: b.observations,
-        counties: b.counties.size,
-        firstYear: b.firstYear,
-        lastYear: b.lastYear,
+        observations: count[speciesId]!,
+        counties: nCounties[speciesId]!,
+        firstYear: hasYear ? firstYear[speciesId]! : null,
+        lastYear: hasYear ? lastYear[speciesId]! : null,
       });
     }
     return rows;
-  }, [filtered, dictionaries.species, dictionaries.family, dictionaries.speciesKey]);
+  }, [filtered, dictionaries.species, dictionaries.family, dictionaries.speciesKey, dictionaries.county.length]);
 
   const filteredRows = useMemo(() => {
     const q = deferredSearch.trim().toLowerCase();
@@ -178,11 +173,11 @@ export function TopSpeciesTable() {
       }
       caveat="Each row aggregates filtered records keyed on GBIF speciesKey. Records not identified to species are excluded. Click a name to filter the whole dashboard to that species."
     >
-      <div className="overflow-x-auto">
-        <table className="min-w-full text-sm">
+      <div className="max-h-[440px] overflow-auto rounded border border-forest-100">
+        <table className="min-w-full text-xs">
           <thead>
-            <tr className="border-b border-forest-200 text-left text-[11px] uppercase tracking-wider text-moss-700">
-              <th className="px-2 py-2 font-medium">#</th>
+            <tr className="sticky top-0 z-10 border-b border-forest-200 bg-cream-50 text-left text-[10px] uppercase tracking-wider text-moss-700">
+              <th className="px-1.5 py-1.5 font-medium">#</th>
               <Th
                 label="Species"
                 sortKey="species"
@@ -198,7 +193,7 @@ export function TopSpeciesTable() {
                 onSort={toggleSort}
               />
               <Th
-                label="Observations"
+                label="Records"
                 sortKey="observations"
                 active={sortKey}
                 dir={sortDir}
@@ -214,7 +209,7 @@ export function TopSpeciesTable() {
                 align="right"
               />
               <Th
-                label="Year range"
+                label="Years"
                 sortKey="lastYear"
                 active={sortKey}
                 dir={sortDir}
@@ -236,11 +231,11 @@ export function TopSpeciesTable() {
                   key={r.speciesId}
                   className="border-b border-forest-100/60 last:border-0 hover:bg-cream-100"
                 >
-                  <td className="px-2 py-2 text-xs tabular-nums text-moss-700">
+                  <td className="px-1.5 py-1 tabular-nums text-moss-700">
                     {i + 1}
                   </td>
-                  <td className="px-2 py-2 font-serif text-bark-700">
-                    <span className="inline-flex flex-wrap items-baseline gap-x-0.5">
+                  <td className="whitespace-nowrap px-1.5 py-1 font-serif text-bark-700">
+                    <span className="inline-flex items-baseline gap-x-0.5">
                       <button
                         type="button"
                         onClick={() =>
@@ -269,14 +264,14 @@ export function TopSpeciesTable() {
                       <InatLink speciesName={r.speciesName} />
                     </span>
                   </td>
-                  <td className="px-2 py-2 text-bark-600">{r.familyName}</td>
-                  <td className="px-2 py-2 text-right tabular-nums text-forest-800">
+                  <td className="px-1.5 py-1 text-bark-600">{r.familyName}</td>
+                  <td className="px-1.5 py-1 text-right tabular-nums text-forest-800">
                     {r.observations.toLocaleString()}
                   </td>
-                  <td className="px-2 py-2 text-right tabular-nums text-forest-800">
+                  <td className="px-1.5 py-1 text-right tabular-nums text-forest-800">
                     {r.counties.toLocaleString()}
                   </td>
-                  <td className="px-2 py-2 text-right tabular-nums text-bark-600">
+                  <td className="whitespace-nowrap px-1.5 py-1 text-right tabular-nums text-bark-600">
                     {r.firstYear === null || r.lastYear === null
                       ? "—"
                       : r.firstYear === r.lastYear
@@ -312,7 +307,7 @@ function Th({
   return (
     <th
       scope="col"
-      className={`px-2 py-2 font-medium ${align === "right" ? "text-right" : ""}`}
+      className={`whitespace-nowrap px-1.5 py-1.5 font-medium ${align === "right" ? "text-right" : ""}`}
       aria-sort={isActive ? (dir === "asc" ? "ascending" : "descending") : "none"}
     >
       <button
@@ -356,7 +351,7 @@ function SearchInput({
         onChange={(e) => onChange(e.target.value)}
         placeholder="Search species or family"
         aria-label="Search species or family"
-        className="w-56 rounded-md border border-forest-200 bg-cream-50 py-1.5 pl-7 pr-2 text-xs text-bark-700 hover:border-forest-300 focus:border-forest-500"
+        className="w-44 rounded-md border border-forest-200 bg-cream-50 py-1.5 pl-7 pr-2 text-xs text-bark-700 hover:border-forest-300 focus:border-forest-500"
       />
     </div>
   );

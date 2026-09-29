@@ -11,7 +11,7 @@ export default function Home() {
     <div className="min-h-screen">
       <SiteHeader />
 
-      <main className="mx-auto max-w-7xl px-6 py-6">
+      <main className="mx-auto max-w-7xl px-4 pb-6 pt-3 sm:px-6">
         <Dashboard precomputed={data} />
 
         <DataGapsSection data={data} />
@@ -54,7 +54,7 @@ export default function Home() {
 
 function DataGapsSection({ data }: { data: Precomputed }) {
   return (
-    <section aria-labelledby="gaps-heading" className="mt-10 nature-card p-6">
+    <section aria-labelledby="gaps-heading" className="mt-6 nature-card p-5">
       <h2 id="gaps-heading" className="font-serif text-lg font-semibold text-forest-800">
         Known data gaps
       </h2>

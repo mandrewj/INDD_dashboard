@@ -57,6 +57,8 @@ export interface Precomputed {
   recordsWithoutSpecies: number;
   recordsOutOfBboxCoords: number;
   recordsYearOutOfRange: number;
+  /** Content hash of records + dictionaries (versions the data URLs). */
+  dataVersion?: string;
 }
 
 /** Field index in a RecordTuple (named for readability in chart code). */

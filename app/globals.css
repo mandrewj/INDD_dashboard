@@ -51,3 +51,9 @@
   background-color: theme('colors.cream.300');
   height: 1px;
 }
+
+/* Figure export (lib/figureExport.ts): render horizontal scrollers in full.
+   Vertical scrollers (the species list) export their visible window. */
+.figure-exporting .overflow-x-auto {
+  overflow: visible !important;
+}

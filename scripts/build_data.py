@@ -26,9 +26,13 @@ Decisions reflected here (confirmed with user):
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 import math
+import os
+import sys
 import time
+from datetime import datetime, timezone
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
@@ -44,7 +48,41 @@ OUT_DIR = ROOT / "public" / "data"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 YEAR_MIN_FLOOR = 1880
-YEAR_MAX_CEIL = 2026
+# Current year, so new records are never treated as "out of range" (this was
+# hard-coded to 2026, which would have hidden every 2027 record).
+YEAR_MAX_CEIL = datetime.now(timezone.utc).year
+
+# GBIF SIMPLE_CSV columns this script reads. A missing one means GBIF changed
+# the export format — fail loudly rather than publish a broken bundle.
+REQUIRED_COLUMNS = [
+    "order", "family", "genus", "species", "scientificName", "speciesKey",
+    "basisOfRecord", "year", "month", "day", "decimalLatitude", "decimalLongitude",
+]
+
+# Sanity gates (override with --force, e.g. after a deliberate scope change).
+MAX_SHRINK = 0.20          # abort if records drop by more than 20% vs. last build
+MAX_BAD_LINE_SHARE = 0.001  # abort if >0.1% of TSV lines fail to parse
+MIN_COUNTY_RESOLVED = 0.60  # abort if <60% of records land in a county
+
+
+class ValidationError(Exception):
+    pass
+
+
+def check(cond: bool, msg: str, force: bool) -> None:
+    if cond:
+        return
+    if force:
+        print(f"WARNING (--force): {msg}")
+        return
+    raise ValidationError(msg)
+
+
+def write_atomic(path: Path, text: str) -> None:
+    """Write via a temp file + rename so a crash never leaves half a file."""
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(text)
+    os.replace(tmp, path)
 IN_BBOX = (-88.15, 37.7, -84.75, 41.85)  # (minLon, minLat, maxLon, maxLat)
 
 
@@ -84,7 +122,10 @@ def encode_dict(values: list[str | None]) -> tuple[dict[str | None, int], list[s
 
 
 def main() -> None:
+    force = "--force" in sys.argv[1:]
     t0 = time.time()
+    if not TSV.exists() or TSV.stat().st_size == 0:
+        raise ValidationError(f"{TSV} is missing or empty — run `npm run refresh:gbif` first.")
     print(f"Loading {TSV} …")
     # GBIF SIMPLE_CSV is a pure tab-delimited dump with NO field quoting:
     # a literal `"` in text columns (e.g. scientificName authorship) is data,
@@ -102,6 +143,35 @@ def main() -> None:
         on_bad_lines="warn",
     )
     print(f"  {len(df):,} rows in {time.time()-t0:.1f}s")
+
+    # Validate the input before doing any work ---------------------------------
+    missing = [c for c in REQUIRED_COLUMNS if c not in df.columns]
+    if missing:
+        raise ValidationError(f"TSV is missing required columns {missing} — did the GBIF export format change?")
+    check(len(df) > 0, "TSV has no data rows.", force)
+    with open(TSV, "rb") as fh:
+        data_lines = sum(1 for _ in fh) - 1  # minus header
+    bad = data_lines - len(df)
+    check(
+        bad <= MAX_BAD_LINE_SHARE * max(1, data_lines),
+        f"{bad:,} of {data_lines:,} TSV lines could not be parsed (limit {MAX_BAD_LINE_SHARE:.1%}).",
+        force,
+    )
+    if bad:
+        print(f"  Skipped {bad:,} malformed line(s).")
+    prev_file = OUT_DIR / "precomputed.json"
+    if prev_file.exists():
+        try:
+            prev_total = int(json.loads(prev_file.read_text()).get("totalRecords", 0))
+        except (ValueError, OSError):
+            prev_total = 0
+        if prev_total:
+            check(
+                len(df) >= (1 - MAX_SHRINK) * prev_total,
+                f"Record count fell from {prev_total:,} to {len(df):,} (>{MAX_SHRINK:.0%}) — "
+                "possibly a truncated or mis-scoped download. Re-run with --force if intended.",
+                force,
+            )
 
     # Numeric coercions
     for c in ["year", "month", "day"]:
@@ -140,6 +210,12 @@ def main() -> None:
     print(f"  Resolved {n_resolved:,} of {len(df):,} rows to a county "
           f"({100*n_resolved/len(df):.1f}%) in {time.time()-t1:.1f}s")
     print(f"  Out-of-IN-bbox coords: {n_oob:,}")
+    check(
+        n_resolved >= MIN_COUNTY_RESOLVED * len(df),
+        f"Only {n_resolved / max(1, len(df)):.0%} of records resolved to a county "
+        f"(expected ≥{MIN_COUNTY_RESOLVED:.0%}) — check coordinates / in-counties.geojson.",
+        force,
+    )
 
     # Canonical species identity ---------------------------------------------
     # speciesKey when present; otherwise None (UNKNOWN bucket).
@@ -287,14 +363,23 @@ def main() -> None:
         ],
     }
 
-    (OUT_DIR / "dictionaries.json").write_text(
-        json.dumps(dictionaries, separators=(",", ":"), allow_nan=False)
-    )
-    (OUT_DIR / "precomputed.json").write_text(
-        json.dumps(precomputed, separators=(",", ":"), indent=2, allow_nan=False)
-    )
-    (OUT_DIR / "records.json").write_text(
-        json.dumps({"records": records}, separators=(",", ":"), allow_nan=False)
+    dict_text = json.dumps(dictionaries, separators=(",", ":"), allow_nan=False)
+    rec_text = json.dumps({"records": records}, separators=(",", ":"), allow_nan=False)
+    # Content hash of the bundle. The app versions its data URLs with it, and
+    # they are served `immutable` for a year — so any content change, even
+    # with an unchanged record count, must change this value.
+    h = hashlib.sha256()
+    h.update(dict_text.encode())
+    h.update(rec_text.encode())
+    precomputed["dataVersion"] = h.hexdigest()[:16]
+
+    # records + dictionaries first, precomputed last: precomputed.json is what
+    # the app bundles, so it only points at the new version once both exist.
+    write_atomic(OUT_DIR / "dictionaries.json", dict_text)
+    write_atomic(OUT_DIR / "records.json", rec_text)
+    write_atomic(
+        OUT_DIR / "precomputed.json",
+        json.dumps(precomputed, separators=(",", ":"), indent=2, allow_nan=False),
     )
 
     # Stats --------------------------------------------------------------------
@@ -309,4 +394,8 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except ValidationError as e:
+        # Non-zero exit stops CI before anything is committed or deployed.
+        sys.exit(f"build_data: ABORTED — {e}")

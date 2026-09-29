@@ -46,15 +46,24 @@ export function pielouEvenness(h: number, s: number): number {
  * Records-per-species abundance vector (dense, indexed by species id; id 0 =
  * unidentified is left at 0). The input format for lib/inext.
  */
+const abundanceCache = new WeakMap<readonly RecordTuple[], Int32Array>();
+
+/**
+ * Cached by the records array's identity, so the KPIs, rank–abundance, and
+ * accumulation cards share one pass. Treat the result as read-only.
+ */
 export function speciesAbundances(
   records: readonly RecordTuple[],
   speciesCount: number,
 ): Int32Array {
+  const hit = abundanceCache.get(records);
+  if (hit && hit.length === speciesCount) return hit;
   const out = new Int32Array(speciesCount);
   for (let i = 0; i < records.length; i++) {
     const sp = records[i]![FIELD.SPECIES];
     if (sp !== 0) out[sp] = out[sp]! + 1;
   }
+  abundanceCache.set(records, out);
   return out;
 }
 

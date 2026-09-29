@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { useLoadedData } from "@/lib/dataContext";
 import { useFilteredRecords } from "@/lib/filterContext";
 import { speciesAbundances } from "@/lib/diversity";
+import { useScope } from "@/lib/scope";
 import { ChartCard, EmptyState, Toggle } from "./ChartCard";
 import { LinePlot } from "./LinePlot";
 
@@ -18,6 +19,7 @@ export function RankAbundance() {
   const { dictionaries } = useLoadedData();
   const filtered = useFilteredRecords();
   const [xScale, setXScale] = useState<XScale>("linear");
+  const scope = useScope();
 
   const { ranked, f1, f2 } = useMemo(() => {
     const counts = speciesAbundances(filtered, dictionaries.species.length);
@@ -57,7 +59,9 @@ export function RankAbundance() {
       subtitle={
         S > 0 ? (
           <>
-            {S.toLocaleString()} species ranked by record count.{" "}
+            {S.toLocaleString()} species of{" "}
+            <strong className="font-semibold text-bark-700">{scope.taxon === "All insects" ? "all insects" : scope.taxon}</strong>{" "}
+            ranked by record count.{" "}
             <span className="font-medium text-bark-700">{f1.toLocaleString()}</span> singletons
             ({((100 * f1) / S).toFixed(0)}%) and{" "}
             <span className="font-medium text-bark-700">{f2.toLocaleString()}</span> doubletons.
@@ -70,7 +74,7 @@ export function RankAbundance() {
           value={xScale}
           onChange={setXScale}
           options={[
-            { value: "linear", label: "Linear rank" },
+            { value: "linear", label: "Linear" },
             { value: "log", label: "Log rank" },
           ]}
         />
@@ -105,7 +109,7 @@ export function RankAbundance() {
       ) : (
         <LinePlot
           series={series}
-          height={300}
+          height={210}
           xLabel="Species rank"
           yLabel="Records (log scale)"
           xScale={xScale}

@@ -6,7 +6,9 @@ import {
   freqTable,
   hillAsymptotic,
   hillObserved,
+  incidenceTable,
   makeEstimator,
+  expectedNewSpecies,
   sampleCoverage,
 } from "./inext";
 
@@ -82,8 +84,9 @@ describe("curve helpers", () => {
 
   it("bootstrap bands bracket the point estimate and are reproducible", () => {
     const curve = computeCurve(makeEstimator(GIRDLED), curveKnots(168));
-    const res = bootstrapCI(GIRDLED, curve, 30, 7);
-    expect(res).toEqual(bootstrapCI(GIRDLED, curve, 30, 7));
+    const t = freqTable(GIRDLED);
+    const res = bootstrapCI(GIRDLED, t, curve, 30, 7);
+    expect(res).toEqual(bootstrapCI(GIRDLED, t, curve, 30, 7));
     const a = res.curve;
     // iNEXT's bootstrap s.e. for Chao1 on this sample is ~14 (analytic 14.3)
     expect(res.asySe[0]).toBeGreaterThan(3);
@@ -110,5 +113,91 @@ describe("curve helpers", () => {
       }
       expect(Number.isNaN(chao1(freqTable(counts)).estimate)).toBe(false);
     }
+  });
+});
+
+// iNEXT's bundled `data(ant)$h500m` (incidence_freq: T = 230 units).
+const ANT_Y = "133,131,123,78,73,65,60,60,56,54,53,52,52,49,47,46,45,44,43,42,41,39,39,38,38,38,38,37,36,34,33,32,32,31,31,30,27,26,25,25,25,24,23,21,21,20,19,18,17,17,17,17,16,16,15,14,14,13,13,13,13,12,12,12,11,11,10,10,10,10,10,9,9,9,9,9,9,9,8,8,8,8,7,7,7,7,7,7,7,7,6,6,6,6,6,6,6,6,6,6,6,5,5,5,5,5,5,5,5,5,4,4,4,4,4,4,4,4,4,4,4,4,4,4,3,3,3,3,3,3,3,3,3,3,3,3,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1"
+  .split(",")
+  .map(Number);
+
+// iNEXT(ant$h500m, q=c(0,1,2), datatype="incidence_freq",
+//       size=c(1,5,20,229,230,231,460), nboot=0)
+const ANT_REF: Array<{ m: number; q0: number; q1: number; q2: number; sc: number }> = [
+  { m: 1, q0: 12.79565, q1: 12.79565, q2: 12.79565, sc: 0.1952438 },
+  { m: 5, q0: 45.69389, q1: 40.93447, q2: 35.92316, sc: 0.5453767 },
+  { m: 20, q0: 98.95589, q1: 72.47643, q2: 54.33821, sc: 0.8266601 },
+  { m: 229, q0: 240.6913, q1: 101.68195, q2: 64.37803, sc: 0.975875 },
+  { m: 230, q0: 241, q1: 101.70557, q2: 64.38298, sc: 0.9759754 },
+  { m: 231, q0: 241.30741, q1: 101.72911, q2: 64.38789, sc: 0.9760755 },
+  { m: 460, q0: 286.54652, q1: 105.25143, q2: 64.95476, sc: 0.9908005 },
+];
+
+describe("iNEXT port — incidence (ant$h500m)", () => {
+  const t = incidenceTable(230, ANT_Y);
+
+  it("summarises like DataInfo(datatype='incidence_freq')", () => {
+    expect(t.n).toBe(230);
+    expect(t.U).toBe(2943);
+    expect(t.S).toBe(241);
+    expect(t.f1).toBe(71);
+    expect(t.f2).toBe(34);
+  });
+
+  it("matches ChaoRichness (Chao2)", () => {
+    const c = chao1(t);
+    expect(c.estimate).toBeCloseTo(314.81, 2);
+    expect(c.se).toBeCloseTo(23.259, 3);
+    expect(c.lower).toBeCloseTo(281.384, 3);
+    expect(c.upper).toBeCloseTo(375.902, 3);
+  });
+
+  it("matches the asymptotic Hill numbers (AsyEst / Diversity_profile.inc)", () => {
+    expect(hillAsymptotic(t, 0)).toBeCloseTo(314.81003836, 6);
+    expect(hillAsymptotic(t, 1)).toBeCloseTo(107.60154263, 6);
+    // q ≥ 2: iNEXT's C++ qDFUN loses precision in the 8th digit (it returns
+    // 2.49827241897583 for Σ C(Y,2)/C(T,2), exact 2.49827226124928), so we
+    // assert the exact closed form, computed in R as
+    // (U/T)^(q/(q-1)) * sum(choose(Y,q)/choose(T,q))^(1/(1-q)).
+    // iNEXT reports 65.53677386 / 50.15745461.
+    expect(hillAsymptotic(t, 2)).toBeCloseTo(65.5367779947, 8);
+    expect(hillAsymptotic(t, 3)).toBeCloseTo(50.1574573614, 8);
+    expect(hillObserved(t, 0.5)).toBeCloseTo(149.1082336, 6);
+    expect(hillObserved(t, 3)).toBeCloseTo(49.51193765, 6);
+  });
+
+  it.each(ANT_REF)("matches rarefaction/extrapolation at t=$m", ({ m, q0, q1, q2, sc }) => {
+    const est = makeEstimator(t);
+    expect(est.hillAt(m, 0)).toBeCloseTo(q0, 3);
+    expect(est.hillAt(m, 1)).toBeCloseTo(q1, 3);
+    expect(est.hillAt(m, 2)).toBeCloseTo(q2, 3);
+    expect(est.coverageAt(m)).toBeCloseTo(sc, 5);
+  });
+
+  it("bootstraps incidence data with non-trivial, reproducible bands", () => {
+    const curve = computeCurve(makeEstimator(t), curveKnots(230));
+    const a = bootstrapCI(ANT_Y, t, curve, 20, 3);
+    expect(a).toEqual(bootstrapCI(ANT_Y, t, curve, 20, 3));
+    // iNEXT's bootstrap s.e. for Chao2 here is ~21–23
+    expect(a.asySe[0]).toBeGreaterThan(8);
+    expect(a.asySe[0]).toBeLessThan(45);
+  });
+});
+
+describe("diversity profile & helpers", () => {
+  const t = freqTable(GIRDLED);
+  it("matches Diversity_profile / Diversity_profile_MLE (spider$Girdled)", () => {
+    expect(hillAsymptotic(t, 1)).toBeCloseTo(13.826253448, 6);
+    expect(hillAsymptotic(t, 2)).toBeCloseTo(8.174825175, 6);
+    expect(hillAsymptotic(t, 3)).toBeCloseTo(6.478520967, 6);
+    expect(hillObserved(t, 0.5)).toBeCloseTo(17.181497358, 6);
+    expect(hillObserved(t, 1.5)).toBeCloseTo(9.358789042, 6);
+    expect(hillObserved(t, 3)).toBeCloseTo(6.248913336, 6);
+  });
+
+  it("expected new species grows with extra effort and is zero at zero effort", () => {
+    expect(expectedNewSpecies(t, 0)).toBeCloseTo(0, 9);
+    expect(expectedNewSpecies(t, 168)).toBeCloseTo(34.730733 - 26, 4);
+    expect(expectedNewSpecies(t, 50)).toBeLessThan(expectedNewSpecies(t, 100));
   });
 });

@@ -195,7 +195,10 @@ function buildRows(
   missingMonthForShown: number;
   absoluteMax: number;
 } {
-  const byGroup = new Map<number, number[]>();
+  // Group × month counts in a flat typed array (no per-record Map lookups).
+  const nG = view.groupLabels.length;
+  const grid = new Int32Array(nG * 12);
+  const groupTotal = new Int32Array(nG);
   const parentMonthly: number[] | null =
     view.parentLabel !== null ? new Array(12).fill(0) : null;
   let parentTotal = 0;
@@ -217,13 +220,13 @@ function buildRows(
 
     const groupId = r[view.groupField] as number;
     if (groupId === 0) continue; // skip rows for the unidentified bucket
-
-    let arr = byGroup.get(groupId);
-    if (!arr) {
-      arr = new Array(12).fill(0);
-      byGroup.set(groupId, arr);
-    }
-    if (m !== null) arr[m - 1] = (arr[m - 1] ?? 0) + 1;
+    groupTotal[groupId]!++;
+    if (m !== null) grid[groupId * 12 + m - 1]!++;
+  }
+  const byGroup = new Map<number, number[]>();
+  for (let g = 1; g < nG; g++) {
+    if (groupTotal[g] === 0) continue;
+    byGroup.set(g, Array.from(grid.subarray(g * 12, g * 12 + 12)));
   }
 
   const dataRows: HeatRow[] = [];
@@ -306,9 +309,9 @@ function dataRowCount(rows: readonly HeatRow[]): number {
 // ---------------------------------------------------------------------------
 // Rendering
 
-const ROW_LABEL_W = 140;
-const COL_W = 46;
-const ROW_H = 28;
+const ROW_LABEL_W = 130;
+const COL_W = 34;
+const ROW_H = 25;
 const TOP_LABEL_H = 22;
 const PARENT_GAP = 6;
 
@@ -337,7 +340,7 @@ function Grid({
       <svg
         viewBox={`0 0 ${width} ${height}`}
         width="100%"
-        style={{ minWidth: width, maxWidth: 760 }}
+        style={{ minWidth: 420, maxWidth: 760 }}
       >
         {/* Month labels */}
         {MONTHS.map((m, i) => (
@@ -364,18 +367,18 @@ function Grid({
               {/* Row label */}
               <text
                 x={ROW_LABEL_W - 8}
-                y={ROW_H / 2 + 3}
+                y={ROW_H / 2 + 1}
                 fontSize={11}
                 fill={row.isParent ? "#080808" : "#080808"}
                 fontWeight={row.isParent ? 700 : 400}
                 fontStyle={row.italic ? "italic" : "normal"}
                 textAnchor="end"
               >
-                {truncateLabel(row.label, 22)}
+                {truncateLabel(row.label, 20)}
               </text>
               <text
                 x={ROW_LABEL_W - 8}
-                y={ROW_H / 2 + 16}
+                y={ROW_H / 2 + 12}
                 fontSize={9}
                 fill="#5f6360"
                 textAnchor="end"

@@ -41,6 +41,7 @@ import ssl
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import zipfile
 from datetime import datetime, timezone
@@ -147,24 +148,116 @@ def submit_download(predicate: dict, user: str, password: str) -> str:
         sys.exit(f"GBIF returned HTTP {e.code} on submit: {body}")
 
 
-def get_status(key: str) -> dict:
-    req = urllib.request.Request(
-        f"{API_BASE}/{key}",
-        headers={"Accept": "application/json", "User-Agent": "INDD-Dashboard-Refresh/1.0"},
-    )
+# Transient network failures worth retrying (HTTPError is a URLError).
+TRANSIENT = (urllib.error.URLError, TimeoutError, ConnectionError, json.JSONDecodeError)
+
+
+def get_json(url: str, auth: str | None = None) -> dict:
+    headers = {"Accept": "application/json", "User-Agent": "INDD-Dashboard-Refresh/1.0"}
+    if auth:
+        headers["Authorization"] = auth
+    req = urllib.request.Request(url, headers=headers)
     with urllib.request.urlopen(req, timeout=60, context=SSL_CTX) as resp:
         return json.loads(resp.read())
 
 
-def download_zip(key: str, dest: Path) -> None:
+def get_status(key: str) -> dict:
+    return get_json(f"{API_BASE}/{key}")
+
+
+def download_zip(key: str, dest: Path, expected_size: int = 0, attempts: int = 4) -> None:
+    """Download with retries, then verify size and zip integrity."""
     url = f"{API_BASE}/request/{key}.zip"
-    req = urllib.request.Request(
-        url, headers={"User-Agent": "INDD-Dashboard-Refresh/1.0"}
-    )
     tmp = dest.with_suffix(dest.suffix + ".part")
-    with urllib.request.urlopen(req, timeout=300, context=SSL_CTX) as resp, open(tmp, "wb") as f:
-        shutil.copyfileobj(resp, f, length=1024 * 1024)
-    tmp.rename(dest)
+    for attempt in range(1, attempts + 1):
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "INDD-Dashboard-Refresh/1.0"})
+            with urllib.request.urlopen(req, timeout=300, context=SSL_CTX) as resp, open(tmp, "wb") as f:
+                shutil.copyfileobj(resp, f, length=1024 * 1024)
+            got = tmp.stat().st_size
+            if expected_size and got != expected_size:
+                raise ConnectionError(f"size mismatch: got {got:,} bytes, expected {expected_size:,}")
+            with zipfile.ZipFile(tmp) as zf:
+                bad = zf.testzip()
+                if bad is not None:
+                    raise ConnectionError(f"corrupt zip member {bad}")
+            tmp.rename(dest)
+            return
+        except (*TRANSIENT, zipfile.BadZipFile) as e:
+            if attempt == attempts:
+                sys.exit(f"Download failed after {attempts} attempts: {e}")
+            wait = 30 * attempt
+            print(f"[{now_iso()}] Download attempt {attempt} failed ({e}); retrying in {wait}s.")
+            time.sleep(wait)
+
+
+# ---------- reuse of recent downloads ---------------------------------------
+
+def predicate_signature(pred: dict) -> frozenset[tuple[str, str]]:
+    """Normalized set of (KEY, value) equality clauses, for comparing ours
+    with the predicate GBIF echoes back (which may add fields or reorder)."""
+    out: set[tuple[str, str]] = set()
+
+    def walk(node: object) -> None:
+        if isinstance(node, dict):
+            if node.get("type") == "equals" and "key" in node:
+                out.add((str(node["key"]).upper(), str(node.get("value", "")).lower()))
+            for v in node.values():
+                walk(v)
+        elif isinstance(node, list):
+            for v in node:
+                walk(v)
+
+    walk(pred)
+    return frozenset(out)
+
+
+def current_citation() -> tuple[str, str]:
+    """(DOI, download date) currently in lib/citation.ts, or ("", "")."""
+    if not CITATION_FILE.exists():
+        return "", ""
+    text = CITATION_FILE.read_text()
+    doi = re.search(r'export const GBIF_DOI = "([^"]*)";', text)
+    date = re.search(r'export const GBIF_DOWNLOAD_DATE = "([^"]*)";', text)
+    return (doi.group(1) if doi else "", date.group(1) if date else "")
+
+
+def find_reusable_download(user: str, password: str, predicate: dict, max_age_days: float = 4) -> tuple[str, str] | None:
+    """Return (key, status) of a recent download with the same predicate that
+    is still running, or finished and newer than the data we already have.
+
+    GBIF can take hours to prepare a download. Without this, a CI run that
+    times out throws that work away and the next run starts from scratch.
+    """
+    try:
+        listing = get_json(
+            f"{API_BASE}/user/{urllib.parse.quote(user)}?limit=20",
+            auth=basic_auth_header(user, password),
+        )
+    except TRANSIENT as e:
+        print(f"[{now_iso()}] Could not list previous downloads ({e}); submitting a new one.")
+        return None
+    ours = predicate_signature(predicate["predicate"])
+    have_doi, have_date = current_citation()
+    now = datetime.now(timezone.utc)
+    for d in listing.get("results", []):
+        req = d.get("request") or {}
+        if req.get("format") != predicate["format"] or predicate_signature(req.get("predicate") or {}) != ours:
+            continue
+        try:
+            created = datetime.fromisoformat(str(d.get("created", "")).replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=timezone.utc)
+        if (now - created).total_seconds() > max_age_days * 86400:
+            continue
+        status = d.get("status", "")
+        if status in ("PREPARING", "RUNNING"):
+            return d["key"], status
+        if status == TERMINAL_OK_STATE and d.get("doi") != have_doi and created.date().isoformat() > have_date:
+            return d["key"], status
+    return None
 
 
 # ---------- citation update -------------------------------------------------
@@ -220,6 +313,11 @@ def parse_args() -> argparse.Namespace:
         help="Skip submission; poll an existing download key (e.g. after a crash).",
     )
     p.add_argument(
+        "--always-submit",
+        action="store_true",
+        help="Don't reuse a recent matching download; always submit a new one.",
+    )
+    p.add_argument(
         "--dry-run",
         action="store_true",
         help="Print the predicate that would be submitted, then exit.",
@@ -234,6 +332,10 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
+    # Line-buffer output so progress shows up live in CI logs (block
+    # buffering hid everything when earlier runs were cancelled mid-poll).
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(line_buffering=True)  # type: ignore[attr-defined]
     args = parse_args()
     load_dotenv()
 
@@ -253,9 +355,13 @@ def main() -> int:
         print(json.dumps(predicate, indent=2))
         return 0
 
+    reuse = None if args.resume or args.always_submit else find_reusable_download(user, password, predicate)
     if args.resume:
         key = args.resume.strip()
         print(f"[{now_iso()}] Resuming download key {key}")
+    elif reuse:
+        key = reuse[0]
+        print(f"[{now_iso()}] Reusing recent matching download {key} (status {reuse[1]})")
     else:
         print(f"[{now_iso()}] Submitting GBIF download request as user '{user}'…")
         key = submit_download(predicate, user, password)
@@ -269,14 +375,24 @@ def main() -> int:
     deadline = time.time() + args.max_poll_hours * 3600
     info: dict = {}
     first = True
+    failures = 0
     while True:
         if not first:
             time.sleep(args.poll_seconds)
         first = False
+        if time.time() > deadline:
+            sys.exit(
+                f"Timeout: download {key} not ready after {args.max_poll_hours}h. "
+                "It keeps preparing on GBIF; the next run will pick it up automatically."
+            )
         try:
             info = get_status(key)
-        except urllib.error.URLError as e:
-            print(f"[{now_iso()}] Network error while polling: {e}; retrying.")
+            failures = 0
+        except TRANSIENT as e:
+            failures += 1
+            if failures >= 20:
+                sys.exit(f"Giving up after {failures} consecutive polling errors: {e}")
+            print(f"[{now_iso()}] Network error while polling ({failures}): {e}; retrying.")
             continue
         status = info.get("status", "?")
         size = info.get("size") or 0
@@ -285,8 +401,6 @@ def main() -> int:
             break
         if status in TERMINAL_FAIL_STATES:
             sys.exit(f"GBIF download ended in terminal state {status}; aborting.")
-        if time.time() > deadline:
-            sys.exit(f"Timeout: download not ready after {args.max_poll_hours}h.")
 
     doi = info.get("doi") or ""
     if not doi:
@@ -295,7 +409,7 @@ def main() -> int:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     zip_path = DATA_DIR / f"gbif-{key}.zip"
     print(f"[{now_iso()}] Downloading zip ({size:,} bytes) → {zip_path.name}")
-    download_zip(key, zip_path)
+    download_zip(key, zip_path, expected_size=int(size or 0))
     print(f"[{now_iso()}] Downloaded {zip_path.stat().st_size:,} bytes.")
 
     print(f"[{now_iso()}] Extracting SIMPLE_CSV → {TARGET_FILE.relative_to(ROOT)}")
@@ -308,6 +422,8 @@ def main() -> int:
         tmp_target = TARGET_FILE.with_suffix(TARGET_FILE.suffix + ".part")
         with zf.open(member) as src, open(tmp_target, "wb") as dst:
             shutil.copyfileobj(src, dst, length=1024 * 1024)
+        if tmp_target.stat().st_size == 0:
+            sys.exit(f"Extracted {member} is empty; leaving {TARGET_FILE.name} unchanged.")
         tmp_target.replace(TARGET_FILE)
     print(f"[{now_iso()}] Wrote {TARGET_FILE.stat().st_size:,} bytes.")
 

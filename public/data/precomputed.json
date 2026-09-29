@@ -14,5 +14,6 @@
   "recordsWithoutMonth":38194,
   "recordsWithoutSpecies":28067,
   "recordsOutOfBboxCoords":266,
-  "recordsYearOutOfRange":12
+  "recordsYearOutOfRange":12,
+  "dataVersion":"3b44c172e6ee656a"
 }

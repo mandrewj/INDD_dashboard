@@ -4,6 +4,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useDeferredValue,
   useEffect,
   useMemo,
   useState,
@@ -19,12 +20,7 @@ import { publishParams } from "./embed";
 import { filtersToParams, parseFilterParams } from "./urlState";
 import type { RecordTuple } from "./types";
 
-interface FilterContextValue {
-  filters: FilterState;
-  yearFloor: number;
-  yearCeil: number;
-  /** Current filters as shareable URL params (names, not ids). */
-  params: URLSearchParams;
+interface FilterSetters {
   setOrder: (id: number | null) => void;
   setFamily: (id: number | null) => void;
   setGenus: (id: number | null) => void;
@@ -37,6 +33,31 @@ interface FilterContextValue {
   reset: () => void;
 }
 
+/**
+ * What the charts see. `filters` is *deferred*: when the user changes a
+ * filter, React re-renders the charts for the new value in the background
+ * (interruptible, time-sliced), so the controls never freeze. This context
+ * only changes when the charts' filters do.
+ */
+interface FilterContextValue extends FilterSetters {
+  filters: FilterState;
+  yearFloor: number;
+  yearCeil: number;
+  /** Shareable URL params (names, not ids) for what the charts show. */
+  params: URLSearchParams;
+}
+
+/** What the filter controls see: the latest choice, updated immediately. */
+interface FilterControlsValue extends FilterSetters {
+  filters: FilterState;
+  yearFloor: number;
+  yearCeil: number;
+  params: URLSearchParams;
+  /** True while charts are still catching up with the controls. */
+  isUpdating: boolean;
+}
+
+const FilterControlsContext = createContext<FilterControlsValue | null>(null);
 const FilterContext = createContext<FilterContextValue | null>(null);
 
 export function FilterProvider({
@@ -63,6 +84,8 @@ export function FilterProvider({
           yearCeil,
         ),
   );
+
+  const deferred = useDeferredValue(filters);
 
   const params = useMemo(
     () => filtersToParams(filters, dictionaries, yearFloor, yearCeil),
@@ -109,12 +132,8 @@ export function FilterProvider({
     setFilters(createInitialFilterState(yearFloor, yearCeil));
   }, [yearFloor, yearCeil]);
 
-  const value = useMemo<FilterContextValue>(
+  const setters = useMemo<FilterSetters>(
     () => ({
-      filters,
-      yearFloor,
-      yearCeil,
-      params,
       setOrder,
       setFamily,
       setGenus,
@@ -125,24 +144,35 @@ export function FilterProvider({
       setTaxon,
       reset,
     }),
-    [
-      filters,
-      yearFloor,
-      yearCeil,
-      params,
-      setOrder,
-      setFamily,
-      setGenus,
-      setSpecies,
-      setCounty,
-      setYearRange,
-      setIncludeNullYear,
-      setTaxon,
-      reset,
-    ],
+    [setOrder, setFamily, setGenus, setSpecies, setCounty, setYearRange, setIncludeNullYear, setTaxon, reset],
   );
 
-  return <FilterContext.Provider value={value}>{children}</FilterContext.Provider>;
+  const deferredParams = useMemo(
+    () => filtersToParams(deferred, dictionaries, yearFloor, yearCeil),
+    [deferred, dictionaries, yearFloor, yearCeil],
+  );
+
+  const view = useMemo<FilterContextValue>(
+    () => ({ ...setters, filters: deferred, yearFloor, yearCeil, params: deferredParams }),
+    [setters, deferred, yearFloor, yearCeil, deferredParams],
+  );
+  const controls = useMemo<FilterControlsValue>(
+    () => ({ ...setters, filters, yearFloor, yearCeil, params, isUpdating: deferred !== filters }),
+    [setters, filters, yearFloor, yearCeil, params, deferred],
+  );
+
+  return (
+    <FilterControlsContext.Provider value={controls}>
+      <FilterContext.Provider value={view}>{children}</FilterContext.Provider>
+    </FilterControlsContext.Provider>
+  );
+}
+
+/** For the filter controls: the latest selection, updated immediately. */
+export function useFilterControls(): FilterControlsValue {
+  const ctx = useContext(FilterControlsContext);
+  if (ctx === null) throw new Error("useFilterControls must be used within FilterProvider");
+  return ctx;
 }
 
 export function useFilters(): FilterContextValue {

@@ -1,12 +1,10 @@
 "use client";
 
-import { useState } from "react";
-import { Filter as FilterIcon, X } from "lucide-react";
 import { DataProvider, useDataState } from "@/lib/dataContext";
 import { FilteredRecordsProvider, FilterProvider } from "@/lib/filterContext";
-import { FilterPanel } from "./FilterPanel";
+import { FilterBar } from "./FilterPanel";
 import { FilteredKpis } from "./FilteredKpis";
-import { ActiveFilterChips } from "./ActiveFilterChips";
+import { CollectorBias } from "./charts/CollectorBias";
 import { CountyChoropleth } from "./charts/CountyChoropleth";
 import { CountyEffort } from "./charts/CountyEffort";
 import { RankAbundance } from "./charts/RankAbundance";
@@ -48,78 +46,43 @@ function DashboardInner({ precomputed }: { precomputed: Precomputed }) {
 }
 
 function DashboardLayout({ precomputed }: { precomputed: Precomputed }) {
-  const [drawerOpen, setDrawerOpen] = useState(false);
   return (
-    <div className="lg:grid lg:grid-cols-[280px_minmax(0,1fr)] lg:gap-8">
-      {/* Sticky sidebar (desktop) */}
-      <aside className="hidden lg:block">
-        <div className="nature-card sticky top-6 max-h-[calc(100vh-3rem)] overflow-y-auto p-5">
-          <FilterPanel />
-        </div>
-      </aside>
-
-      {/* Mobile open-filter button */}
-      <div className="mb-4 flex items-center justify-between gap-3 lg:hidden">
-        <button
-          type="button"
-          onClick={() => setDrawerOpen(true)}
-          className="inline-flex items-center gap-2 rounded-md border border-forest-300 bg-cream-50 px-3 py-1.5 text-sm text-forest-800 hover:bg-cream-100"
-        >
-          <FilterIcon className="h-4 w-4" aria-hidden />
-          Filters
-        </button>
+    <div>
+      {/* Filters: sticky so they stay reachable inside the fixed-height iframe. */}
+      <div className="sticky top-0 z-30 -mx-1 mb-4 rounded-b-lg border-b border-cream-300 bg-cream-50/95 px-1 pb-2 pt-1 backdrop-blur">
+        <FilterBar />
       </div>
 
-      {/* Mobile drawer */}
-      {drawerOpen && (
-        <div className="fixed inset-0 z-40 lg:hidden" role="dialog" aria-modal="true" aria-label="Filters">
-          <div
-            className="absolute inset-0 bg-bark-700/40"
-            onClick={() => setDrawerOpen(false)}
+      {/* Row 1: map beside the headline numbers + the abundance distribution
+          that drives the richness estimate. */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
+        <CountyChoropleth />
+        <div className="flex min-w-0 flex-col gap-4">
+          <FilteredKpis
+            unfilteredTotal={precomputed.totalRecords}
+            totalCounties={precomputed.totalCountiesInIndiana}
           />
-          <div className="absolute inset-y-0 left-0 w-[88%] max-w-sm overflow-y-auto bg-cream-50 p-5 shadow-leaf">
-            <div className="mb-3 flex items-center justify-between">
-              <span className="text-xs uppercase tracking-wider text-moss-600">
-                Filters
-              </span>
-              <button
-                type="button"
-                aria-label="Close filters"
-                onClick={() => setDrawerOpen(false)}
-                className="rounded-md p-1 text-forest-700 hover:bg-cream-200"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-            <FilterPanel />
-          </div>
+          <RankAbundance />
         </div>
-      )}
+      </div>
 
-      {/* Main column */}
-      <div className="min-w-0">
-        <section aria-label="Summary for the current filters">
-          <ActiveFilterChips />
-          <div className="mt-3">
-            <FilteredKpis
-              unfilteredTotal={precomputed.totalRecords}
-              totalCounties={precomputed.totalCountiesInIndiana}
-            />
-          </div>
-        </section>
+      <div className="mt-4 grid grid-cols-1 gap-4">
+        <SpeciesAccumulation />
+      </div>
 
-        <div className="mt-6 grid grid-cols-1 gap-6">
-          <CountyChoropleth />
-          <SpeciesAccumulation />
-          <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-            <CountyEffort />
-            <RankAbundance />
-          </div>
-          <ObservationsOverTime />
-          <SeasonalityHeatmap />
-          <TaxonomicComposition />
-          <TopSpeciesTable />
-        </div>
+      <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <CountyEffort />
+        <CollectorBias />
+      </div>
+
+      <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <ObservationsOverTime />
+        <SeasonalityHeatmap />
+      </div>
+
+      <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <TaxonomicComposition />
+        <TopSpeciesTable />
       </div>
     </div>
   );

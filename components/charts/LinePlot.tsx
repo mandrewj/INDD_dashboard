@@ -25,6 +25,10 @@ export interface PlotSeries {
   band?: Array<{ x: number; lo: number; hi: number }>;
   /** Emphasised points (e.g. the observed sample). */
   markers?: XY[];
+  /** Vertical error bars (drawn with the markers). */
+  errorBars?: Array<{ x: number; lo: number; hi: number }>;
+  /** Draw markers hollow (e.g. estimates vs. observations). */
+  hollowMarkers?: boolean;
 }
 
 type Scale = "linear" | "log";
@@ -81,6 +85,15 @@ export function LinePlot({
         x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x);
         y0 = Math.min(y0, p.y); y1 = Math.max(y1, p.y);
       }
+      for (const p of s.markers ?? []) {
+        if (!valid(p.x, xScale) || !valid(p.y, yScale)) continue;
+        x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x);
+        y0 = Math.min(y0, p.y); y1 = Math.max(y1, p.y);
+      }
+      for (const b of s.errorBars ?? []) {
+        if (valid(b.hi, yScale)) y1 = Math.max(y1, b.hi);
+        if (valid(b.lo, yScale)) y0 = Math.min(y0, b.lo);
+      }
       for (const b of s.band ?? []) {
         if (valid(b.hi, yScale)) y1 = Math.max(y1, b.hi);
         if (valid(b.lo, yScale)) y0 = Math.min(y0, b.lo);
@@ -100,34 +113,51 @@ export function LinePlot({
   const xTicks = useMemo(() => (dom ? ticks(dom.x, xScale, Math.max(3, Math.floor(innerW / 90))) : []), [dom, xScale, innerW]);
   const yTicks = useMemo(() => (dom ? ticks(dom.y, yScale, 6) : []), [dom, yScale]);
 
-  if (!dom) return <div ref={ref} style={{ height }} />;
+  // Path strings and label positions depend only on data, size, and scales —
+  // memoized so hover re-renders (every mouse move) don't rebuild them. The
+  // rank–abundance curve alone is ~9,000 points.
+  const geom = useMemo(() => {
+    if (!dom) return null;
+    const fy = (v: number) => sy(clampY(v, dom.y, yScale)).toFixed(1);
+    const path = (pts: XY[]) =>
+      pts
+        .filter((p) => valid(p.x, xScale) && valid(p.y, yScale))
+        .map((p, i) => `${i === 0 ? "M" : "L"}${sx(p.x).toFixed(1)},${fy(p.y)}`)
+        .join("");
+    const bandPath = (b: NonNullable<PlotSeries["band"]>) => {
+      const ok = b.filter((p) => valid(p.x, xScale) && valid(p.hi, yScale));
+      if (ok.length < 2) return "";
+      const top = ok.map((p, i) => `${i === 0 ? "M" : "L"}${sx(p.x).toFixed(1)},${fy(p.hi)}`).join("");
+      const bottom = [...ok]
+        .reverse()
+        .map((p) => `L${sx(p.x).toFixed(1)},${fy(Math.max(p.lo, yScale === "log" ? dom.y[0] : p.lo))}`)
+        .join("");
+      return `${top}${bottom}Z`;
+    };
+    const lines = new Map(
+      series.map((s) => [
+        s.key,
+        { segments: s.segments.map((seg) => ({ d: path(seg.points), dashed: seg.dashed })), band: s.band ? bandPath(s.band) : "" },
+      ]),
+    );
+    // Non-overlapping end labels: sort by y, then push apart by 14px.
+    const labels = endLabels
+      ? series
+          .map((s) => {
+            const last = s.segments.flatMap((g) => g.points).filter((p) => valid(p.y, yScale)).at(-1);
+            return last ? { s, y: sy(clampY(last.y, dom.y, yScale)), x: sx(last.x) } : null;
+          })
+          .filter((v): v is { s: PlotSeries; y: number; x: number } => v !== null)
+          .sort((a, b) => a.y - b.y)
+      : [];
+    for (let i = 1; i < labels.length; i++) {
+      if (labels[i]!.y - labels[i - 1]!.y < 14) labels[i]!.y = labels[i - 1]!.y + 14;
+    }
+    return { lines, labels };
+  }, [dom, series, sx, sy, xScale, yScale, endLabels]);
 
-  const path = (pts: XY[]) =>
-    pts
-      .filter((p) => valid(p.x, xScale) && valid(p.y, yScale))
-      .map((p, i) => `${i === 0 ? "M" : "L"}${sx(p.x).toFixed(1)},${sy(clampY(p.y, dom.y, yScale)).toFixed(1)}`)
-      .join("");
-  const bandPath = (b: NonNullable<PlotSeries["band"]>) => {
-    const ok = b.filter((p) => valid(p.x, xScale) && valid(p.hi, yScale));
-    if (ok.length < 2) return "";
-    const top = ok.map((p, i) => `${i === 0 ? "M" : "L"}${sx(p.x).toFixed(1)},${sy(clampY(p.hi, dom.y, yScale)).toFixed(1)}`).join("");
-    const bottom = [...ok].reverse().map((p) => `L${sx(p.x).toFixed(1)},${sy(clampY(Math.max(p.lo, yScale === "log" ? dom.y[0] : p.lo), dom.y, yScale)).toFixed(1)}`).join("");
-    return `${top}${bottom}Z`;
-  };
-
-  // Non-overlapping end labels: sort by y, then push apart by 14px.
-  const labels = endLabels
-    ? series
-        .map((s) => {
-          const last = s.segments.flatMap((g) => g.points).filter((p) => valid(p.y, yScale)).at(-1);
-          return last ? { s, y: sy(clampY(last.y, dom.y, yScale)), x: sx(last.x) } : null;
-        })
-        .filter((v): v is { s: PlotSeries; y: number; x: number } => v !== null)
-        .sort((a, b) => a.y - b.y)
-    : [];
-  for (let i = 1; i < labels.length; i++) {
-    if (labels[i]!.y - labels[i - 1]!.y < 14) labels[i]!.y = labels[i - 1]!.y + 14;
-  }
+  if (!dom || !geom) return <div ref={ref} style={{ height }} />;
+  const { lines, labels } = geom;
 
   const hoverRows =
     hoverX === null
@@ -191,13 +221,13 @@ export function LinePlot({
           )}
 
           {series.map((s) =>
-            s.band ? <path key={`b${s.key}`} d={bandPath(s.band)} fill={s.color} opacity={0.14} /> : null,
+            s.band ? <path key={`b${s.key}`} d={lines.get(s.key)?.band} fill={s.color} opacity={0.14} /> : null,
           )}
           {series.map((s) =>
-            s.segments.map((seg, i) => (
+            (lines.get(s.key)?.segments ?? []).map((seg, i) => (
               <path
                 key={`${s.key}-${i}`}
-                d={path(seg.points)}
+                d={seg.d}
                 fill="none"
                 stroke={s.color}
                 strokeWidth={2}
@@ -207,14 +237,25 @@ export function LinePlot({
             )),
           )}
           {series.map((s) =>
+            (s.errorBars ?? [])
+              .filter((b) => valid(b.hi, yScale))
+              .map((b, i) => (
+                <g key={`${s.key}-e${i}`} stroke={s.color} strokeWidth={1.5}>
+                  <line x1={sx(b.x)} x2={sx(b.x)} y1={sy(clampY(Math.max(b.lo, yScale === "log" ? dom.y[0] : b.lo), dom.y, yScale))} y2={sy(clampY(b.hi, dom.y, yScale))} />
+                  <line x1={sx(b.x) - 4} x2={sx(b.x) + 4} y1={sy(clampY(b.hi, dom.y, yScale))} y2={sy(clampY(b.hi, dom.y, yScale))} />
+                  <line x1={sx(b.x) - 4} x2={sx(b.x) + 4} y1={sy(clampY(Math.max(b.lo, yScale === "log" ? dom.y[0] : b.lo), dom.y, yScale))} y2={sy(clampY(Math.max(b.lo, yScale === "log" ? dom.y[0] : b.lo), dom.y, yScale))} />
+                </g>
+              )),
+          )}
+          {series.map((s) =>
             (s.markers ?? []).map((p, i) => (
               <circle
                 key={`${s.key}-m${i}`}
                 cx={sx(p.x)}
                 cy={sy(clampY(p.y, dom.y, yScale))}
                 r={4.5}
-                fill={s.color}
-                stroke="#FFFFFF"
+                fill={s.hollowMarkers ? "#FFFFFF" : s.color}
+                stroke={s.hollowMarkers ? s.color : "#FFFFFF"}
                 strokeWidth={2}
               />
             )),
@@ -317,10 +358,16 @@ function clampY(v: number, d: [number, number], kind: Scale): number {
 
 export function ticks(d: [number, number], kind: Scale, count: number): number[] {
   if (kind === "log") {
+    // Decades only, unless the axis spans too few of them to read — then
+    // add 2× and 5× steps (and 3× for very short ranges).
+    const decades = Math.log10(d[1] / d[0]);
+    const mults = decades >= 2.5 ? [1] : decades >= 1 ? [1, 2, 5] : [1, 2, 3, 5];
     const out: number[] = [];
     for (let e = Math.floor(Math.log10(d[0])); e <= Math.ceil(Math.log10(d[1])); e++) {
-      const v = 10 ** e;
-      if (v >= d[0] * 0.999 && v <= d[1] * 1.001) out.push(v);
+      for (const m of mults) {
+        const v = m * 10 ** e;
+        if (v >= d[0] * 0.999 && v <= d[1] * 1.001) out.push(v);
+      }
     }
     return out;
   }

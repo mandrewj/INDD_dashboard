@@ -11,10 +11,12 @@ import {
 import type { Dictionaries, RecordTuple } from "./types";
 import precomputed from "@/public/data/precomputed.json";
 
-// Use a value that changes whenever the data is rebuilt — totalRecords plus
-// the year filter ceiling make a stable, build-bound version key without
-// requiring a separate manifest file.
-const precomputedVersion = `${precomputed.totalRecords}-${precomputed.yearFilterCeil}`;
+// Data URLs are served `immutable` for a year (vercel.json), so the version
+// key must change whenever the *content* changes. build_data.py writes a
+// content hash (`dataVersion`); older bundles fall back to count + ceiling.
+const precomputedVersion =
+  (precomputed as { dataVersion?: string }).dataVersion ??
+  `${precomputed.totalRecords}-${precomputed.yearFilterCeil}`;
 
 /** Minimal GeoJSON shape we need (counties only; Polygon or MultiPolygon). */
 export interface CountyFeature {
@@ -51,10 +53,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
 
     async function load() {
       try {
-        // Cache-bust on the precomputed totalRecords value — when the data
-        // is rebuilt, this changes too, so the URL changes and we sidestep
-        // any stale browser/CDN cache. (force-cache here would re-use a
-        // possibly-broken prior response across reloads.)
+        // Versioned by content hash: a rebuild changes the URL, sidestepping
+        // any stale browser/CDN cache.
         const v = String(precomputedVersion);
         const [recRes, dictRes, geoRes] = await Promise.all([
           fetch(`/data/records.json?v=${v}`),

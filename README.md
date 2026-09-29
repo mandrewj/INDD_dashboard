@@ -41,9 +41,9 @@ npm run dev
 
 | File                  | What it contains                                   | Size  |
 | --------------------- | -------------------------------------------------- | ----- |
-| `records.json`        | Slim per-record table (dictionary-encoded)         | ~15 MB |
+| `records.json`        | Slim per-record table (dictionary-encoded)         | ~16 MB |
 | `dictionaries.json`   | id↔label lookups for orders/families/.../counties  | ~324 KB |
-| `precomputed.json`    | KPIs and unfiltered totals                         | <1 KB |
+| `precomputed.json`    | KPIs, unfiltered totals, `dataVersion` hash        | <1 KB |
 | `in-counties.geojson` | Simplified Indiana county polygons (Census 1:500k) | ~110 KB |
 
 These are committed to the repo so deployment doesn't depend on the Python
@@ -56,8 +56,8 @@ npm run dev           # Next dev server (HMR)
 npm run build         # Production build
 npm run start         # Serve the production build
 npm run lint          # next lint
-npm test              # Jest unit tests (lib/diversity)
-npm run build:data    # Re-run the Python data pipeline
+npm test              # Jest unit tests (iNEXT port vs. R, URL state, aggregations)
+npm run build:data    # Re-run the Python data pipeline (validates; --force to override)
 ```
 
 ## Updating data
@@ -92,49 +92,43 @@ submission so you can watch progress in the browser too. If your shell
 disconnects mid-poll, restart with `--resume <key>` to rejoin without
 re-submitting.
 
-### Weekly cron (launchd)
+### Scheduled refresh (GitHub Actions)
 
-A LaunchAgent runs the refresh + rebuild + commit/push pipeline every Monday
-at 05:00 local time. The pieces:
+`.github/workflows/refresh-data.yml` runs Mondays and Thursdays at 09:00 UTC
+(and on demand via *Run workflow*): `refresh:gbif` → `build:data` → commit →
+push, which triggers a Vercel deploy. Credentials come from the repo secrets
+`GBIF_USER`, `GBIF_PASSWORD`, and `GBIF_NOTIFY_EMAIL`.
 
-- `scripts/cron_refresh.sh` — does `refresh:gbif` → `build:data` → commit/push
-  if anything changed; macOS notification on failure, silent on success.
-- `scripts/com.iddl.indd-dashboard-refresh.plist` — the LaunchAgent that
-  invokes the script. Installed copy lives at
-  `~/Library/LaunchAgents/com.iddl.indd-dashboard-refresh.plist`.
-- Logs: `~/Library/Logs/INDD_dashboard_refresh.{out,err,}.log`.
+Safeguards, so that a bad download never reaches the live site:
 
-```bash
-# Install (or reinstall after editing the plist):
-cp scripts/com.iddl.indd-dashboard-refresh.plist ~/Library/LaunchAgents/
-launchctl unload -w ~/Library/LaunchAgents/com.iddl.indd-dashboard-refresh.plist 2>/dev/null
-launchctl load   -w ~/Library/LaunchAgents/com.iddl.indd-dashboard-refresh.plist
+- **Download reuse.** GBIF sometimes takes hours to prepare a download.
+  Before submitting, the script looks for a matching download from the last
+  4 days that is still running, or finished and newer than the current data,
+  and reuses it. So a run that times out doesn't waste GBIF's work: the next
+  run picks it up. `--always-submit` disables this.
+- **Bounded waits and retries.** Polling stops at 1.6 h, inside the job's
+  2 h limit, with a clear error. Transient network errors are retried. The
+  zip download is retried and checked for size and integrity.
+- **Validation gate** in `build_data.py`. It aborts, and nothing is
+  committed, if required columns are missing, more than 0.1% of TSV lines
+  fail to parse, the record count drops more than 20% from the last build,
+  or fewer than 60% of records resolve to a county. After a deliberate scope
+  change, run `python3 scripts/build_data.py --force`.
+- **Atomic writes.** Output files are written to temp files and renamed, so a
+  crash can't leave half-written JSON.
+- **Push race.** If `main` moved during the run, the job rebases and retries
+  the push.
+- **Cache safety.** `precomputed.json` carries `dataVersion`, a content hash
+  of the bundle. Data URLs are versioned with it and served `immutable`, so
+  any content change reaches every browser even if the record count is
+  unchanged.
+- The year ceiling is the current year, so new records are never treated
+  as out of range.
 
-# Manually trigger (don't wait for Monday):
-launchctl start com.iddl.indd-dashboard-refresh
-
-# Inspect:
-launchctl list | grep com.iddl.indd
-tail -F ~/Library/Logs/INDD_dashboard_refresh.{out,err}.log
-```
-
-**Two macOS gotchas this setup works around** — both stem from the project
-living in `~/Documents/`, which is iCloud-synced and TCC-protected:
-
-1. **Full Disk Access for `/bin/bash`** (one-time, manual). Without it,
-   launchd cannot read the script and the run fails with `Operation not
-   permitted` (exit 126). Open **System Settings → Privacy & Security →
-   Full Disk Access**, click **+**, press **⌘⇧G**, type `/bin/bash`, click
-   **Open**, and toggle it on.
-2. **`osascript` wrapper around bash** (already wired into the plist). When
-   launchd spawns `/bin/bash` directly, `mmap()` calls on iCloud-synced
-   paths can deadlock against the FileProvider extension and fail with
-   `Resource deadlock avoided` — this killed both `.env` reads and `git
-   commit` in earlier revisions. Wrapping the bash invocation in
-   `osascript -e 'do shell script "..."'` detaches the spawned shell from
-   launchd's immediate child domain and bypasses the deadlock. If you ever
-   regenerate the plist and revert to a direct `/bin/bash` invocation, the
-   weekly run will start failing again at the commit stage.
+`scripts/cron_refresh.sh` runs the same pipeline locally for ad-hoc
+refreshes (`bash scripts/cron_refresh.sh`). The old launchd agent is
+retired: macOS privacy (TCC) controls kept blocking it from reading
+`~/Documents`.
 
 ### Manual: drop in your own TSV
 
@@ -214,9 +208,8 @@ keeps `output` unset so Vercel's image optimizer handles the small icons.
 ├── app/                  # App Router — root layout + page
 ├── components/
 │   ├── Dashboard.tsx     # Client shell: data + filter providers, layout
-│   ├── FilterPanel.tsx   # Sticky sidebar / mobile drawer
+│   ├── FilterPanel.tsx   # FilterBar: sticky one-row filters + copy link
 │   ├── FilteredKpis.tsx  # Live KPIs that respond to filters
-│   ├── ActiveFilterChips.tsx
 │   ├── SiteHeader.tsx
 │   └── charts/
 │       ├── ChartCard.tsx          # Card wrapper (+ "How to read this"), Toggle, shared chart styles
@@ -225,6 +218,7 @@ keeps `output` unset so Vercel's image optimizer handles the small icons.
 │       ├── SpeciesAccumulation.tsx # iNEXT rarefaction/extrapolation + Hill-number table
 │       ├── CountyEffort.tsx       # Records vs. species per county vs. statewide rarefaction
 │       ├── RankAbundance.tsx      # Whittaker plot (singletons/doubletons)
+│       ├── CollectorBias.tsx      # Observations vs. specimens: taxonomic bias
 │       ├── ObservationsOverTime.tsx # Records by source / species per year / discovery curve
 │       ├── TaxonomicComposition.tsx (Recharts Treemap)
 │       ├── SeasonalityHeatmap.tsx (custom SVG, drills into active filter)
@@ -242,6 +236,10 @@ keeps `output` unset so Vercel's image optimizer handles the small icons.
 │   ├── useInext.ts       # React hook around the worker
 │   ├── urlState.ts       # Filters ⇄ shareable URL params (by name)
 │   ├── embed.ts          # iframe glue: postMessage to insectid.org, share URLs
+│   ├── aggregates.ts     # Cached typed-array aggregates (county × species)
+│   ├── taxonIndex.ts     # Static taxonomy index for the filter cascade
+│   ├── scope.ts          # "What is this chart analysing?" label for cards + exports
+│   ├── figureExport.ts   # Captioned golden-ratio PNG export of any card
 │   ├── colorscale.ts     # Viridis interpolation
 │   ├── citation.ts       # GBIF DOI + URL builders
 │   └── inaturalist.ts    # Cached iNat taxon-id lookup
@@ -251,7 +249,7 @@ keeps `output` unset so Vercel's image optimizer handles the small icons.
 │   ├── build_data.py            # Main pipeline (TSV → JSON bundle)
 │   ├── build_counties_geojson.py
 │   ├── refresh_gbif_data.py     # Submits + polls a fresh GBIF download
-│   ├── cron_refresh.sh          # Weekly launchd entry point
+│   ├── cron_refresh.sh          # Local ad-hoc refresh (same pipeline as CI)
 │   ├── com.iddl.indd-dashboard-refresh.plist  # LaunchAgent definition
 │   └── profile.py               # One-off schema profiler
 ├── public/
@@ -302,36 +300,71 @@ just won't pre-filter until the page code is installed.
 
 ## Analytical views (for teaching)
 
-Each card has a collapsible **How to read this** with the method and a
-"try this" prompt, written for undergraduate courses and public workshops.
+Every card names the taxon, place, and years it is analysing. Each card also
+has a collapsible **How to read this** (method plus a "try this" prompt,
+written for undergraduate courses and public workshops) and a **PNG** button
+(see *Figure export*).
 
-- **KPIs**: observed vs. **Chao1-estimated** species (95% CI) and **sample
-  coverage**, so "how many species?" always comes with "how complete?".
-- **Species accumulation (iNEXT)**: rarefaction/extrapolation of Hill
-  numbers q = 0, 1, 2 by sample size or by coverage, plus the completeness
-  curve, with 50-replicate bootstrap bands. Compare by data source, by time
-  period, or selected county vs. rest of state. `lib/inext.ts` reproduces
-  iNEXT 3.0.2 to ≥6 significant figures (`lib/inext.test.ts` checks against
-  `spider$Girdled` values). The card exports curve CSVs and an abundance
-  vector plus an R snippet to rerun the analysis in iNEXT.
-- **Sampling effort vs. species**: county records vs. species on log–log
-  axes against the statewide rarefaction curve, which separates effort from
-  diversity.
+- **KPIs** (beside the map): observed vs. **Chao1-estimated** species (95%
+  CI) and **sample coverage**, so "how many species?" always comes with "how
+  complete?".
+- **Map**: species, records, completeness (sample coverage) per county, and
+  **Survey gaps**. That view uses a ~11 km grid shaded by the chance that
+  the next record in each cell is a species new to that cell (1 − coverage,
+  cells with ≥ 20 records), plus a ranked "where to survey next" list. The
+  tooltip also extrapolates how many new species doubling the cell's records
+  would add.
 - **Rank–abundance**: the singleton/doubleton tail behind Chao1.
-- **Map → Completeness**: per-county sample coverage, which shows survey
-  gaps.
-- **Records through time**: by data source (specimens → iNaturalist era),
-  species per year, and a discovery curve.
+- **Species accumulation (iNEXT)**: rarefaction/extrapolation of Hill
+  numbers q = 0, 1, 2 by sample size or coverage, the completeness curve,
+  and a **diversity profile** (observed Hill numbers for q = 0–3 with
+  estimated values ± CI at q = 0, 1, 2, 3). Bands and CIs come from 50
+  bootstrap replicates. It runs on **abundance** data (records) or
+  **incidence** data (sampling units: county × year or 10-km cell × year;
+  iNEXT `incidence_freq`, Chao2). Groups can be compared by data source, time
+  period, or selected county vs. rest of state. The card exports curve CSVs
+  plus the input data and R code to rerun everything in iNEXT.
+  `lib/inext.ts` is tested against iNEXT 3.0.2 (`spider$Girdled` for
+  abundance, `ant$h500m` for incidence).
+- **Sampling effort vs. species**: county records vs. species on log–log
+  axes against the statewide rarefaction curve.
+- **Who records what**: which subgroups (orders → families → genera →
+  species, following the filter) are over-represented in community
+  observations vs. museum specimens, and how many species each source alone
+  has documented.
+- **Records through time** (by source, species/year, discovery curve),
+  **seasonality**, **taxonomic composition**, **species list**.
+
+### Figure export
+
+The PNG button on every card renders that card's figure into a 1618 × 1000
+(golden-ratio) image at 2× resolution. The image includes the title, the
+analysis scope, the card's caption, the GBIF DOI citation, a lab credit,
+and a link to the exact view on insectid.org (`lib/figureExport.ts`,
+using `html-to-image`). Controls and download buttons are left out; mark
+any element `data-export-exclude` to do the same.
 
 ## Architectural notes
 
 - **All filtering happens client-side.** `useFilteredRecords()` runs the
   O(n) filter scan once per `(records, filters)` change and shares the
-  result with every chart and the KPI strip via React context — adding more
-  charts doesn't compound the cost.
+  result with every chart and the KPI strip via React context, so adding
+  more charts doesn't compound the cost.
+- **Filters never block input.** The controls read `useFilterControls()`,
+  which updates immediately. Charts read `useFilters()`, whose filters are
+  React-deferred (`useDeferredValue`), so they re-render in background,
+  time-sliced passes. A filter change paints in under 10 ms; all charts
+  settle within about 70–150 ms on the full 414k records (production build,
+  M-series Mac), with no main-thread block over 50 ms.
+- **Hot loops use typed arrays**, indexed by dictionary id, rather than a
+  `Map`/`Set` per record. Shared aggregates are cached by the filtered
+  array's identity (`lib/aggregates.ts`: county × species matrix;
+  `speciesAbundances` in `lib/diversity.ts`), so the map and the effort
+  chart share one pass. The filter dropdowns use a static taxonomy index
+  built once per load (`lib/taxonIndex.ts`).
 - **Records are dictionary-encoded** (positional tuples of integer ids).
-  366 k rows + 50 columns (~221 MB raw TSV) compresses to ~15 MB JSON in
-  this representation.
+  ~414 k rows + 50 columns (~250 MB raw TSV) compresses to ~16 MB JSON
+  (~3.6 MB brotli over the wire) in this representation.
 - **County is derived at build time** by point-in-polygon against the
   Indiana county GeoJSON. ~83 % of records resolve; the rest land in the
   *Unknown / unmapped* bucket and are surfaced in the data-gaps panel.

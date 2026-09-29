@@ -1,62 +1,97 @@
 /**
- * Abundance-based rarefaction / extrapolation of Hill numbers — a TypeScript
- * port of the parts of the R package iNEXT (v3; Hsieh, Ma & Chao 2016) that
- * the dashboard needs:
+ * Rarefaction / extrapolation of Hill numbers — a TypeScript port of the
+ * parts of the R package iNEXT (v3; Hsieh, Ma & Chao 2016) the dashboard
+ * needs, for both of iNEXT's main data types:
  *
- *   - Hill numbers of order q = 0 (richness), 1 (exp Shannon), 2 (inverse
- *     Simpson): observed (MLE), rarefied to m < n, extrapolated to m > n,
- *     and asymptotic estimates (Chao1; Chao et al. 2013 entropy; unbiased
- *     Simpson).
+ *   - "abundance": x = records per species; sample size n = Σx.
+ *   - "incidence" (iNEXT `incidence_freq`): T sampling units, y = number of
+ *     units each species was detected in; U = Σy total incidences.
+ *
+ * The two share every formula once written in terms of (n, U): for abundance
+ * data U = n. Provided:
+ *
+ *   - Hill numbers of order q: observed (MLE, any q ≥ 0), rarefied to m < n,
+ *     extrapolated to m > n (q = 0, 1, 2), and asymptotic estimates (q = 0:
+ *     Chao1 / Chao2; q = 1: Chao et al. 2013; integer q ≥ 2: unbiased).
  *   - Sample coverage Ĉ(m) (Chao & Jost 2012), interpolated and extrapolated.
- *   - Bootstrap standard errors using iNEXT's estimated bootstrap assemblage
- *     (detected species with adjusted p̂ᵢ + f̂₀ undetected species).
+ *   - Bootstrap standard errors via iNEXT's estimated bootstrap assemblage.
  *
- * Validated against iNEXT 3.0.2 output on `data(spider)$Girdled` — see
- * lib/inext.test.ts.
- *
- * "Individuals" here are GBIF occurrence records identified to species. That
- * is an approximation (records are not independent individuals), and the UI
- * says so.
+ * Validated against iNEXT 3.0.2 on `spider$Girdled` (abundance) and
+ * `ant$h500m` (incidence) — see lib/inext.test.ts.
  *
  * Everything works on the *frequency-count* form (value i → fᵢ = number of
- * species with exactly i records), like iNEXT, so cost scales with the
- * number of distinct abundance values rather than the number of species.
+ * species with exactly i records/units), like iNEXT, so cost scales with the
+ * number of distinct values rather than the number of species.
  */
 
 export type Q = 0 | 1 | 2;
 export const QS: readonly Q[] = [0, 1, 2];
+export type DataType = "abundance" | "incidence";
 
-/** Distinct abundance values and how many species have each. */
+/** Orders q for the observed diversity profile (0 → 3). */
+export const PROFILE_QS: readonly number[] = Array.from({ length: 31 }, (_, k) => k / 10);
+
+/** Distinct abundance/incidence values and how many species have each. */
 export interface FreqTable {
-  /** abundance values i (ascending, all > 0) */
+  type: DataType;
+  /** values i (ascending, all > 0) */
   i: Float64Array;
-  /** fᵢ — species count at each abundance value */
+  /** fᵢ — species count at each value (Qᵢ for incidence) */
   f: Float64Array;
+  /** sample size: records (abundance) or sampling units T (incidence) */
   n: number;
+  /** total incidences Σy (incidence); equals n for abundance data */
+  U: number;
   S: number;
   f1: number;
   f2: number;
 }
 
-export function freqTable(counts: ArrayLike<number>): FreqTable {
+function tabulate(values: ArrayLike<number>): { m: Map<number, number>; sum: number; S: number } {
   const m = new Map<number, number>();
-  let n = 0;
+  let sum = 0;
   let S = 0;
-  for (let k = 0; k < counts.length; k++) {
-    const x = counts[k]!;
+  for (let k = 0; k < values.length; k++) {
+    const x = values[k]!;
     if (x <= 0) continue;
     m.set(x, (m.get(x) ?? 0) + 1);
-    n += x;
+    sum += x;
     S++;
   }
+  return { m, sum, S };
+}
+
+function build(type: DataType, m: Map<number, number>, n: number, U: number, S: number): FreqTable {
   const keys = [...m.keys()].sort((a, b) => a - b);
-  const i = new Float64Array(keys);
-  const f = new Float64Array(keys.map((k) => m.get(k)!));
-  return { i, f, n, S, f1: m.get(1) ?? 0, f2: m.get(2) ?? 0 };
+  return {
+    type,
+    i: new Float64Array(keys),
+    f: new Float64Array(keys.map((k) => m.get(k)!)),
+    n,
+    U,
+    S,
+    f1: m.get(1) ?? 0,
+    f2: m.get(2) ?? 0,
+  };
+}
+
+/** Abundance data: records per species. */
+export function freqTable(counts: ArrayLike<number>): FreqTable {
+  const { m, sum, S } = tabulate(counts);
+  return build("abundance", m, sum, sum, S);
+}
+
+/**
+ * Incidence data: `T` sampling units and, per species, the number of units
+ * it was detected in (each ≤ T).
+ */
+export function incidenceTable(T: number, detections: ArrayLike<number>): FreqTable {
+  const { m, sum, S } = tabulate(detections);
+  return build("incidence", m, T, sum, S);
 }
 
 // ---------------------------------------------------------------------------
-// log-factorial table, shared across calls with the same (or smaller) n.
+// log-factorial and harmonic tables, grown on demand and shared across calls.
 
 let lfCache = new Float64Array([0, 0]);
 function logFactorials(n: number): Float64Array {
@@ -71,7 +106,7 @@ function logFactorials(n: number): Float64Array {
 // ---------------------------------------------------------------------------
 // Undetected-species quantities
 
-/** Chao1 estimate of undetected richness f̂₀ (bias-corrected when f₂ = 0). */
+/** Chao1 (abundance) / Chao2 (incidence) undetected richness f̂₀. */
 export function f0Hat(t: FreqTable): number {
   const { n, f1, f2 } = t;
   if (n === 0) return 0;
@@ -84,40 +119,37 @@ function coverageA(t: FreqTable): number {
   return t.f1 > 0 ? (t.n * f0) / (t.n * f0 + t.f1) : 1;
 }
 
-/** Sample coverage of the reference sample, Ĉₙ = 1 − (f₁/n)·A. */
+/** Sample coverage of the reference sample, Ĉ = 1 − (f₁/U)·A. */
 export function sampleCoverage(t: FreqTable): number {
-  if (t.n === 0) return 0;
-  return 1 - (t.f1 / t.n) * coverageA(t);
+  if (t.n === 0 || t.U === 0) return 0;
+  return 1 - (t.f1 / t.U) * coverageA(t);
 }
 
 // ---------------------------------------------------------------------------
 // Observed and asymptotic diversity
 
-/** Hill number of order q for the observed relative abundances (MLE). */
-export function hillObserved(t: FreqTable, q: Q): number {
-  const { i, f, n, S } = t;
-  if (n === 0) return 0;
+/** Hill number of order q (any q ≥ 0) of the observed relative frequencies. */
+export function hillObserved(t: FreqTable, q: number): number {
+  const { i, f, U, S } = t;
+  if (U === 0) return 0;
   if (q === 0) return S;
-  if (q === 1) {
+  if (Math.abs(q - 1) < 1e-9) {
     let h = 0;
     for (let k = 0; k < i.length; k++) {
-      const p = i[k]! / n;
+      const p = i[k]! / U;
       h -= f[k]! * p * Math.log(p);
     }
     return Math.exp(h);
   }
   let s = 0;
-  for (let k = 0; k < i.length; k++) {
-    const p = i[k]! / n;
-    s += f[k]! * p * p;
-  }
-  return 1 / s;
+  for (let k = 0; k < i.length; k++) s += f[k]! * Math.pow(i[k]! / U, q);
+  return Math.pow(s, 1 / (1 - q));
 }
 
 /** Chao et al. (2013) second-order correction term for Shannon entropy. */
 function shannonCorrection(n: number, f1: number, f2: number): number {
   if (f1 === 0) return 0;
-  const p1 = f2 > 0 ? (2 * f2) / ((n - 1) * f1 + 2 * f2) : f1 > 0 ? 2 / ((n - 1) * (f1 - 1) + 2) : 1;
+  const p1 = f2 > 0 ? (2 * f2) / ((n - 1) * f1 + 2 * f2) : f1 > 1 ? 2 / ((n - 1) * (f1 - 1) + 2) : 1;
   if (p1 >= 1) return 0;
   // B = f1/n · (1-p1)^(1-n) · (−ln p1 − Σ_{r=1}^{n-1} (1-p1)^r / r).
   const q = 1 - p1;
@@ -145,10 +177,18 @@ function shannonCorrection(n: number, f1: number, f2: number): number {
   return (f1 / n) * Math.pow(q, 1 - n) * (-Math.log(p1) - partial);
 }
 
-/** Asymptotic (estimated true) Hill number of order q. */
-export function hillAsymptotic(t: FreqTable, q: Q): number {
-  const { i, f, n, S } = t;
-  if (n === 0) return 0;
+/** log C(a, k) for real a ≥ k ≥ 0 integer k (a is an integer here). */
+function lchoose(lf: Float64Array, a: number, k: number): number {
+  return lf[a]! - lf[k]! - lf[a - k]!;
+}
+
+/**
+ * Asymptotic (estimated true) Hill number. q = 0, 1, or an integer ≥ 2.
+ * For incidence data these are the iNEXT `Diversity_profile.inc` estimators.
+ */
+export function hillAsymptotic(t: FreqTable, q: number): number {
+  const { i, f, n, U, S } = t;
+  if (n === 0 || U === 0) return 0;
   if (q === 0) return S + f0Hat(t);
   if (q === 1) {
     // A = Σ x/n (ψ(n) − ψ(x)), with ψ(n) − ψ(x) = Σ_{k=x}^{n-1} 1/k.
@@ -164,15 +204,20 @@ export function hillAsymptotic(t: FreqTable, q: Q): number {
       }
       A += f[j]! * (x / n) * harm;
     }
-    return Math.exp(A + shannonCorrection(n, t.f1, t.f2));
+    // Abundance: exp(A + B). Incidence rescales by n/U (= T/U); U = n makes
+    // the two identical.
+    return Math.exp((n / U) * (A + shannonCorrection(n, t.f1, t.f2)) + Math.log(U / n));
   }
-  if (n < 2) return hillObserved(t, 2);
+  if (!Number.isInteger(q) || q < 2) throw new Error(`hillAsymptotic: unsupported q=${q}`);
+  if (n < q) return hillObserved(t, q);
+  const lf = logFactorials(n);
   let s = 0;
   for (let k = 0; k < i.length; k++) {
     const x = i[k]!;
-    s += f[k]! * x * (x - 1);
+    if (x >= q) s += f[k]! * Math.exp(lchoose(lf, x, q) - lchoose(lf, n, q));
   }
-  return s === 0 ? Number.POSITIVE_INFINITY : (n * (n - 1)) / s;
+  if (s === 0) return Number.POSITIVE_INFINITY;
+  return Math.pow(U / n, q / (q - 1)) * Math.pow(s, 1 / (1 - q));
 }
 
 // ---------------------------------------------------------------------------
@@ -191,14 +236,16 @@ function rarefyQ0(t: FreqTable, m: number, lf: Float64Array): number {
 }
 
 function rarefyQ1(t: FreqTable, m: number, lf: Float64Array): number {
-  const { i, f, n } = t;
-  const logm = Math.log(m);
+  const { i, f, n, U } = t;
+  // Expected total at size m: m records, or m·U/T incidences.
+  const Um = (m * U) / n;
+  const logUm = Math.log(Um);
+  const plogp = (k: number) => (k > 0 ? (k / Um) * (Math.log(k) - logUm) : 0);
   let h = 0;
   if (m === n - 1) {
-    // Removing one record: K = x−1 with prob x/n, else K = x. Exact, and it
+    // Removing one unit: K = x−1 with prob x/n, else K = x. Exact, and it
     // matters — the extrapolation slope β hinges on D(n) − D(n−1), a tiny
     // difference the windowed sum below can't resolve precisely enough.
-    const plogp = (k: number) => (k > 0 ? (k / m) * (Math.log(k) - logm) : 0);
     for (let j = 0; j < i.length; j++) {
       const x = i[j]!;
       h -= f[j]! * ((x / n) * plogp(x - 1) + (1 - x / n) * plogp(x));
@@ -208,7 +255,7 @@ function rarefyQ1(t: FreqTable, m: number, lf: Float64Array): number {
   const lCnm = lf[n]! - lf[m]! - lf[n - m]!;
   for (let j = 0; j < i.length; j++) {
     const x = i[j]!;
-    // K ~ Hypergeometric(n, x, m). Sum −(k/m)ln(k/m)·P(K=k) over a window
+    // K ~ Hypergeometric(n, x, m). Sum −(k/Um)ln(k/Um)·P(K=k) over a window
     // around the mean wide enough that the omitted mass is negligible.
     const lo = Math.max(1, m - (n - x));
     const hi = Math.min(x, m);
@@ -222,37 +269,37 @@ function rarefyQ1(t: FreqTable, m: number, lf: Float64Array): number {
     let e = 0;
     for (let k = a; k <= b; k++) {
       const lp = lx - lf[k]! - lf[x - k]! + lnx - lf[m - k]! - lf[n - x - m + k]! - lCnm;
-      e += Math.exp(lp) * (k / m) * (Math.log(k) - logm);
+      e += Math.exp(lp) * plogp(k);
     }
     h -= f[j]! * e;
   }
   return Math.exp(h);
 }
 
-function simpsonSum(t: FreqTable): number {
-  const { i, f, n } = t;
-  if (n < 2) return 1;
+/**
+ * q = 2 at any size m, rarefied or extrapolated:
+ *   ²D(m) = m·U² / (n·(U + (m−1)·Σx(x−1)/(n−1)))
+ * (reduces to iNEXT's abundance and incidence forms when U = n / U = Σy).
+ */
+function hillQ2At(t: FreqTable, m: number): number {
+  const { i, f, n, U } = t;
+  if (n < 2) return hillObserved(t, 2);
   let s = 0;
   for (let k = 0; k < i.length; k++) {
     const x = i[k]!;
     s += f[k]! * x * (x - 1);
   }
-  return s / (n * (n - 1));
-}
-
-/** Closed form for q = 2, valid for both rarefaction and extrapolation. */
-function hillQ2At(t: FreqTable, m: number): number {
-  return 1 / (1 / m + (1 - 1 / m) * simpsonSum(t));
+  return (m * U * U) / (n * (U + ((m - 1) * s) / (n - 1)));
 }
 
 function coverageRarefied(t: FreqTable, m: number, lf: Float64Array): number {
-  const { i, f, n } = t;
+  const { i, f, n, U } = t;
   const base = lf[n - 1 - m]! - lf[n - 1]!;
   let s = 0;
   for (let k = 0; k < i.length; k++) {
     const x = i[k]!;
     if (n - x < m) break;
-    s += f[k]! * (x / n) * Math.exp(lf[n - x]! - lf[n - x - m]! + base);
+    s += f[k]! * (x / U) * Math.exp(lf[n - x]! - lf[n - x - m]! + base);
   }
   return 1 - s;
 }
@@ -272,34 +319,24 @@ export interface Estimator {
  * Build an evaluator over one assemblage. Caches the quantities that are
  * reused across many m (observed, asymptotic, D(n−1), β).
  */
-export function makeEstimator(counts: ArrayLike<number> | FreqTable): Estimator {
-  const t = "f" in counts && "i" in counts ? (counts as FreqTable) : freqTable(counts as ArrayLike<number>);
+export function makeEstimator(input: ArrayLike<number> | FreqTable): Estimator {
+  const t = "f" in input && "i" in input ? (input as FreqTable) : freqTable(input as ArrayLike<number>);
   const lf = logFactorials(t.n);
-  const obs = new Map<Q, number>();
-  const betas = new Map<Q, number>();
-  const asys = new Map<Q, number>();
   const A = coverageA(t);
+  const cache = new Map<0 | 1, { o: number; a: number; beta: number }>();
 
   function extrapolationParams(q: 0 | 1): { o: number; a: number; beta: number } {
-    let o = obs.get(q);
-    if (o === undefined) {
-      o = hillObserved(t, q);
-      obs.set(q, o);
-    }
-    let a = asys.get(q);
-    if (a === undefined) {
-      a = hillAsymptotic(t, q);
-      asys.set(q, a);
-    }
-    let beta = betas.get(q);
-    if (beta === undefined) {
+    let p = cache.get(q);
+    if (!p) {
+      const o = hillObserved(t, q);
+      const a = hillAsymptotic(t, q);
       // iNEXT 3: D(n+m*) = D_obs + (D_asy − D_obs)(1 − (1 − β)^m*),
       // β = (D_obs − D(n−1)) / (D_asy − D(n−1)).
       const dn1 = t.n > 1 ? (q === 0 ? rarefyQ0(t, t.n - 1, lf) : rarefyQ1(t, t.n - 1, lf)) : o;
-      beta = a !== dn1 ? (o - dn1) / (a - dn1) : 0;
-      betas.set(q, beta);
+      p = { o, a, beta: a !== dn1 ? (o - dn1) / (a - dn1) : 0 };
+      cache.set(q, p);
     }
-    return { o, a, beta };
+    return p;
   }
 
   return {
@@ -315,12 +352,21 @@ export function makeEstimator(counts: ArrayLike<number> | FreqTable): Estimator 
     },
     coverageAt(m: number): number {
       const n = t.n;
-      if (n === 0 || m <= 0) return 0;
+      if (n === 0 || m <= 0 || t.U === 0) return 0;
       if (m < n) return coverageRarefied(t, m, lf);
-      if (m === n) return 1 - (t.f1 / n) * A;
-      return 1 - (t.f1 / n) * Math.pow(A, m - n + 1);
+      if (m === n) return 1 - (t.f1 / t.U) * A;
+      return 1 - (t.f1 / t.U) * Math.pow(A, m - n + 1);
     },
   };
+}
+
+/**
+ * Expected number of *new* species from `extra` more records/units beyond
+ * the current sample: ⁰D(n + extra) − S_obs.
+ */
+export function expectedNewSpecies(t: FreqTable, extra: number): number {
+  if (t.n === 0) return 0;
+  return Math.max(0, makeEstimator(t).hillAt(t.n + extra, 0) - t.S);
 }
 
 /**
@@ -367,7 +413,7 @@ export function computeCurve(est: Estimator, ms: readonly number[]): CurvePoint[
 }
 
 // ---------------------------------------------------------------------------
-// Chao1 with iNEXT's log-normal confidence interval
+// Chao1 / Chao2 with iNEXT's log-normal confidence interval
 
 export interface Chao1 {
   observed: number;
@@ -432,24 +478,30 @@ export function mulberry32(seed: number): () => number {
   };
 }
 
-/** Bootstrap assemblage probabilities: adjusted detected p̂ᵢ + f̂₀ equal undetected. */
-export function bootstrapAssemblage(counts: ArrayLike<number>): number[] {
+/**
+ * Bootstrap assemblage: adjusted detection probabilities for detected species
+ * plus f̂₀ equal-probability undetected species. For abundance these are
+ * multinomial cell probabilities; for incidence, per-unit detection
+ * probabilities (iNEXT `BootstrapFun`).
+ */
+export function bootstrapAssemblage(values: ArrayLike<number>, t: FreqTable): number[] {
   const xs: number[] = [];
-  for (let k = 0; k < counts.length; k++) if (counts[k]! > 0) xs.push(counts[k]!);
-  const t = freqTable(xs);
-  const n = t.n;
+  for (let k = 0; k < values.length; k++) if (values[k]! > 0) xs.push(values[k]!);
+  const { n, U } = t;
   if (n === 0) return [];
   const f0 = f0Hat(t);
   const C = sampleCoverage(t);
+  // Incidence probabilities are per unit, so the unseen mass is scaled by U/T.
+  const scale = U / n;
   let lambda = 0;
   if (f0 > 0) {
     let s = 0;
     for (const x of xs) s += (x / n) * Math.pow(1 - x / n, n);
-    lambda = s > 0 ? (1 - C) / s : 0;
+    lambda = s > 0 ? (scale * (1 - C)) / s : 0;
   }
   const p = xs.map((x) => (x / n) * (1 - lambda * Math.pow(1 - x / n, n)));
   const f0Int = Math.max(Math.round(f0), 1);
-  if (f0 > 0) for (let k = 0; k < f0Int; k++) p.push((1 - C) / f0Int);
+  if (f0 > 0) for (let k = 0; k < f0Int; k++) p.push((scale * (1 - C)) / f0Int);
   return p;
 }
 
@@ -485,6 +537,21 @@ export function sampleMultinomial(p: readonly number[], n: number, rand: () => n
   return out;
 }
 
+/** Binomial(n, p) by geometric skipping — O(n·min(p, 1−p)) expected. */
+export function sampleBinomial(n: number, p: number, rand: () => number): number {
+  if (p <= 0) return 0;
+  if (p >= 1) return n;
+  if (p > 0.5) return n - sampleBinomial(n, 1 - p, rand);
+  const lq = Math.log(1 - p);
+  let k = 0;
+  let pos = 0;
+  for (;;) {
+    pos += Math.floor(Math.log(1 - rand()) / lq) + 1;
+    if (pos > n) return k;
+    k++;
+  }
+}
+
 export interface CurveWithCI extends CurvePoint {
   /** lower / upper 95% bounds for qD[0..2] */
   lo: [number, number, number];
@@ -493,25 +560,27 @@ export interface CurveWithCI extends CurvePoint {
   scHi: number;
 }
 
-/**
- * Bootstrap ±1.96·s.e. bands around each knot, as iNEXT does (conditional on
- * the sample; bands are clamped at 0 / 1).
- */
 export interface BootstrapResult {
   curve: CurveWithCI[];
   /** Bootstrap s.e. of the asymptotic estimates for q = 0, 1, 2. */
   asySe: [number, number, number];
 }
 
+/**
+ * Bootstrap ±1.96·s.e. bands around each knot, as iNEXT does (conditional on
+ * the sample; bands are clamped at 0 / 1). `values` are the per-species
+ * counts (abundance) or detection counts (incidence) behind `t`.
+ */
 export function bootstrapCI(
-  counts: ArrayLike<number>,
+  values: ArrayLike<number>,
+  t: FreqTable,
   curve: readonly CurvePoint[],
   B = 50,
   seed = 1,
 ): BootstrapResult {
-  const n = curve.find((c) => c.method === "Observed")?.m ?? 0;
+  const n = t.n;
   const rand = mulberry32(seed);
-  const p = bootstrapAssemblage(counts);
+  const p = bootstrapAssemblage(values, t);
   const K = curve.length;
   // Running sums for mean / variance per (knot, metric): 3 hill + 1 coverage.
   const sum = new Float64Array(K * 4);
@@ -521,8 +590,15 @@ export function bootstrapCI(
   let reps = 0;
   if (n > 0 && p.length > 0) {
     for (let b = 0; b < B; b++) {
-      const sample = sampleMultinomial(p, n, rand);
-      const est = makeEstimator(sample);
+      let bt: FreqTable;
+      if (t.type === "abundance") {
+        bt = freqTable(sampleMultinomial(p, n, rand));
+      } else {
+        const ys = p.map((pi) => sampleBinomial(n, pi, rand));
+        bt = incidenceTable(n, ys);
+        if (bt.U === 0) continue;
+      }
+      const est = makeEstimator(bt);
       for (let k = 0; k < K; k++) {
         const m = curve[k]!.m;
         const vals = [est.hillAt(m, 0), est.hillAt(m, 1), est.hillAt(m, 2), est.coverageAt(m)];
@@ -534,7 +610,7 @@ export function bootstrapCI(
         }
       }
       for (const q of QS) {
-        const a = hillAsymptotic(est.t, q);
+        const a = hillAsymptotic(bt, q);
         asySum[q] = asySum[q]! + a;
         asySq[q] = asySq[q]! + a * a;
       }

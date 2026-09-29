@@ -4,7 +4,8 @@ import { useMemo, useRef, useState } from "react";
 import { useLoadedData } from "@/lib/dataContext";
 import { useFilteredRecordsExceptCounty, useFilters } from "@/lib/filterContext";
 import { makeEstimator, sampleCoverage, freqTable } from "@/lib/inext";
-import { FIELD } from "@/lib/types";
+import { countyRow, countySpeciesMatrix } from "@/lib/aggregates";
+import { useScope } from "@/lib/scope";
 import { AXIS_STROKE, ChartCard, EmptyState, GRID_STROKE } from "./ChartCard";
 import { defaultFormat, makeScale, ticks, useWidth } from "./LinePlot";
 
@@ -18,7 +19,7 @@ interface CountyPoint {
   expected: number;
 }
 
-const H = 340;
+const H = 300;
 const M = { top: 12, right: 16, bottom: 40, left: 56 };
 
 /**
@@ -33,24 +34,15 @@ export function CountyEffort() {
   const ref = useRef<HTMLDivElement>(null);
   const width = useWidth(ref);
   const [hover, setHover] = useState<CountyPoint | null>(null);
+  const scope = useScope(true);
 
   const { points, curve } = useMemo(() => {
-    const nSp = dictionaries.species.length;
-    const byCounty = new Map<number, Int32Array>();
-    const pooled = new Int32Array(nSp);
-    for (const r of records) {
-      const c = r[FIELD.COUNTY];
-      const sp = r[FIELD.SPECIES];
-      if (c === 0 || sp === 0) continue;
-      let v = byCounty.get(c);
-      if (!v) byCounty.set(c, (v = new Int32Array(nSp)));
-      v[sp] = v[sp]! + 1;
-      pooled[sp] = pooled[sp]! + 1;
-    }
-    const est = makeEstimator(pooled);
+    // Same cached county × species matrix the map uses: one pass, shared.
+    const m = countySpeciesMatrix(records, dictionaries.county.length, dictionaries.species.length);
+    const est = makeEstimator(m.pooled);
     const pts: CountyPoint[] = [];
-    for (const [id, v] of byCounty) {
-      const t = freqTable(v);
+    for (let id = 1; id < m.nCounty; id++) {
+      const t = freqTable(countyRow(m, id));
       if (t.n === 0) continue;
       pts.push({
         id,
@@ -91,13 +83,15 @@ export function CountyEffort() {
   return (
     <ChartCard
       title="Sampling effort vs. species per county"
+      ignoreCounty
       subtitle={
         points.length > 0 ? (
           <>
-            Each dot is a county. The line is the species count expected if a
-            county’s records were a random draw from the whole state.{" "}
-            {above} of {points.length} counties sit above it. Click a dot to
-            filter.
+            Records and species of{" "}
+            <strong className="font-semibold text-bark-700">{scope.taxon === "All insects" ? "all insects" : scope.taxon}</strong>{" "}
+            in each county (dots) vs. a random draw of the same size from the
+            whole state (line). {above} of {points.length} counties sit above
+            it. Click a dot to filter.
           </>
         ) : undefined
       }
