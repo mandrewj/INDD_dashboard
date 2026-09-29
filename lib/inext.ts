@@ -641,3 +641,65 @@ export function bootstrapCI(
   });
   return { curve: out, asySe };
 }
+
+// ---------------------------------------------------------------------------
+// Is the richness estimate trustworthy yet?
+
+export type RichnessStatus = "near-asymptote" | "rising" | "far-from-asymptote";
+
+export interface RichnessCompleteness {
+  /** Observed ÷ estimated richness (S_obs / Chao1), 0–1. */
+  ratio: number;
+  /**
+   * Additional records (or sampling units) needed to detect `g` of the
+   * estimated richness (Chao et al. 2009). 0 if already reached; Infinity
+   * if it can't be estimated (no doubletons).
+   */
+  extraNeeded: number;
+  /** extraNeeded ÷ current sample size. */
+  extraRatio: number;
+  status: RichnessStatus;
+  g: number;
+}
+
+/**
+ * Flags Chao1/Chao2 estimates that are probably too low because the
+ * accumulation curve is still far from flat.
+ *
+ * Chao1 is a *lower bound* (Chao 1984): it estimates the minimum true
+ * richness, and underestimates while sampling is incomplete. Chao et al.
+ * (2009, Ecology 90:1125–1133) give the additional sample m needed to detect
+ * a proportion g of the estimated richness Ŝ, using the same extrapolation
+ * model as iNEXT's q = 0 curve (Shen, Chao & Lin 2003):
+ *
+ *   Ŝ(n+m) = S_obs + f̂₀ [1 − (1 − f₁ / (n f̂₀ + f₁))^m]
+ *   ⇒ m_g = ln[(1 − g) Ŝ / f̂₀] / ln[1 − f₁ / (n f̂₀ + f₁)]
+ *
+ * (≈ n f₁ / (2 f₂) · ln[f̂₀ / ((1 − g) Ŝ)], the paper's approximation.)
+ *
+ * Status:
+ *   - near-asymptote: S_obs ≥ g·Ŝ already.
+ *   - rising: reaching g·Ŝ needs less than doubling the sample — within the
+ *     range where extrapolation is reliable (Chao et al. 2014).
+ *   - far-from-asymptote: it needs more than doubling, beyond reliable
+ *     extrapolation, so Ŝ itself is probably an underestimate.
+ */
+export function richnessCompleteness(t: FreqTable, g = 0.9): RichnessCompleteness {
+  const { n, S, f1 } = t;
+  const f0 = f0Hat(t);
+  const est = S + f0;
+  const ratio = est > 0 ? S / est : 1;
+  if (n === 0 || f0 <= 0 || f1 === 0 || S >= g * est) {
+    return { ratio, extraNeeded: 0, extraRatio: 0, status: "near-asymptote", g };
+  }
+  const perUnit = Math.log(1 - f1 / (n * f0 + f1));
+  const extraNeeded = perUnit < 0 ? Math.log(((1 - g) * est) / f0) / perUnit : Number.POSITIVE_INFINITY;
+  const extraRatio = extraNeeded / n;
+  return {
+    ratio,
+    extraNeeded,
+    extraRatio,
+    status: extraRatio > 1 ? "far-from-asymptote" : "rising",
+    g,
+  };
+}

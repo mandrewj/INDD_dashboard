@@ -4,7 +4,8 @@ import { useMemo } from "react";
 import { useLoadedData } from "@/lib/dataContext";
 import { useFilteredRecords } from "@/lib/filterContext";
 import { speciesAbundances } from "@/lib/diversity";
-import { chao1, freqTable, sampleCoverage } from "@/lib/inext";
+import { chao1, freqTable, richnessCompleteness, sampleCoverage } from "@/lib/inext";
+import { RichnessFlag, richnessFlagTitle } from "./RichnessFlag";
 import { FIELD } from "@/lib/types";
 
 export function FilteredKpis({
@@ -35,6 +36,7 @@ export function FilteredKpis({
       identified: t.n,
       species: t.S,
       chao: chao1(t),
+      rc: richnessCompleteness(t),
       coverage: sampleCoverage(t),
       families,
       counties,
@@ -55,13 +57,14 @@ export function FilteredKpis({
       <Kpi label="Species observed" value={stats.species.toLocaleString()} />
       <Kpi
         label="Estimated species"
-        title="Chao1 lower-bound estimate of total richness, with 95% CI"
+        title={`Chao1 estimate of total richness, with 95% CI. ${hasSp ? richnessFlagTitle(stats.rc, "records") : ""}`}
         value={hasSp ? Math.round(stats.chao.estimate).toLocaleString() : "—"}
         sublabel={
           hasSp
             ? `95% CI ${Math.round(stats.chao.lower).toLocaleString()}–${Math.round(stats.chao.upper).toLocaleString()} (Chao1)`
             : undefined
         }
+        extra={hasSp ? <RichnessFlag rc={stats.rc} /> : undefined}
       />
       <Kpi
         label="Sample completeness"
@@ -84,11 +87,13 @@ function Kpi({
   value,
   sublabel,
   title,
+  extra,
 }: {
   label: string;
   value: string;
   sublabel?: string;
   title?: string;
+  extra?: React.ReactNode;
 }) {
   return (
     <div className="nature-card px-3 py-2" title={title}>
@@ -99,6 +104,7 @@ function Kpi({
       {sublabel ? (
         <dd className="mt-0.5 text-[11px] leading-snug text-moss-600 tabular-nums">{sublabel}</dd>
       ) : null}
+      {extra ? <dd className="mt-1">{extra}</dd> : null}
     </div>
   );
 }

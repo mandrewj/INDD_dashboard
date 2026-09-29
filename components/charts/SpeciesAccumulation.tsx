@@ -10,6 +10,7 @@ import type { InextGroupInput, InextGroupResult } from "@/lib/inext.worker";
 import { PROFILE_QS, type CurveWithCI, type DataType, type Q } from "@/lib/inext";
 import { FIELD, type RecordTuple } from "@/lib/types";
 import { ChartCard, EmptyState, SERIES_COLORS, Toggle } from "./ChartCard";
+import { RichnessFlag, richnessFlagTitle } from "../RichnessFlag";
 import { LinePlot, defaultFormat, type PlotSeries } from "./LinePlot";
 
 type View = "size" | "coverage" | "completeness" | "profile";
@@ -408,9 +409,14 @@ function SummaryTable({ groups }: { groups: InextGroupResult[] }) {
               <td className="px-1.5 py-1 text-right">{g.f1.toLocaleString()}/{g.f2.toLocaleString()}</td>
               <td className="px-1.5 py-1 text-right">{pct(g.coverage)}</td>
               {([0, 1, 2] as const).map((q) => (
-                <td key={q} className="px-1.5 py-1 text-right">
+                <td
+                  key={q}
+                  className="px-1.5 py-1 text-right"
+                  title={q === 0 ? richnessFlagTitle(g.richness, inc ? "sampling units" : "records") : undefined}
+                >
                   {fmt(g.observed[q])}→<span className="font-semibold text-forest-800">{fmt(g.asymptotic[q])}</span>
                   <div className="text-[10px] text-moss-600">{se(g, q)}</div>
+                  {q === 0 ? <RichnessFlag rc={g.richness} compact /> : null}
                 </td>
               ))}
             </tr>
@@ -535,6 +541,19 @@ function Explainer() {
         A steeply falling profile means a few species dominate. If two groups’
         profiles cross, which one is “more diverse” depends on how much weight
         you give rare species.
+      </p>
+      <p>
+        <strong>Is the estimate trustworthy yet?</strong> Chao1 (and Chao2)
+        estimate the <em>minimum</em> true richness: while the curve is still
+        climbing they usually underestimate. Under each richness estimate a flag
+        applies the sufficient-sampling test of Chao et al. (2009): how much more
+        sampling would it take to record 90% of the estimated species? If that is
+        more than doubling the current sample, beyond the range where
+        extrapolation is reliable, the estimate is flagged <em>curve still
+        steep</em>. Read it as “at least this many”. Exception: singletons from
+        misidentifications or stray individuals inflate Chao1, so a steep flag
+        on a well-known group (e.g. butterflies) can mean messy data rather
+        than undiscovered species.
       </p>
       <p>
         <strong>Coverage</strong> is the estimated share of all records (or

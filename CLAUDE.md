@@ -45,6 +45,7 @@ A refresh runs in GitHub Actions: `.github/workflows/refresh-data.yml` fires Mon
 ## Architectural rules of thumb
 
 - All filtering is client-side; `useFilteredRecords()` runs the O(n) scan once per (records, filters) change and shares the result via context. New charts read from this context — don't re-filter inside individual charts. County-comparison views use `useFilteredRecordsExceptCounty()` (same context, county released).
+- Richness estimates (Chao1/Chao2) are shown with `RichnessFlag` (`richnessCompleteness`, Chao et al. 2009 sufficient-sampling test). Anywhere a new view shows an estimated richness, show the flag too. Never present Chao1 as a settled total.
 - Diversity math lives in `lib/inext.ts` (iNEXT port, tested against R iNEXT 3.0.2 output). Anything heavier than Chao1/coverage (curves, bootstrap) goes through the worker via `useInext()`, not on the main thread. If you change the estimators, regenerate reference values in R (`iNEXT(x, q=c(0,1,2), datatype="abundance", size=..., nboot=0)`) rather than loosening test tolerances.
 - Charts needing CI bands / log axes / multi-series crosshair use `components/charts/LinePlot.tsx`; simple bar/line charts stay on Recharts. Comparison series use `SERIES_COLORS` (Okabe-Ito subset, fixed order) with direct labels.
 - `lib/inext.worker.ts` must only ever be loaded by `new Worker(...)`. Import *types* from it, never values: importing a value pulls the module into the page bundle and installs its `onmessage` on `window`. Shared constants live in `lib/inext.ts`.

@@ -9,6 +9,7 @@ import {
   incidenceTable,
   makeEstimator,
   expectedNewSpecies,
+  richnessCompleteness,
   sampleCoverage,
 } from "./inext";
 
@@ -199,5 +200,36 @@ describe("diversity profile & helpers", () => {
     expect(expectedNewSpecies(t, 0)).toBeCloseTo(0, 9);
     expect(expectedNewSpecies(t, 168)).toBeCloseTo(34.730733 - 26, 4);
     expect(expectedNewSpecies(t, 50)).toBeLessThan(expectedNewSpecies(t, 100));
+  });
+});
+
+describe("richnessCompleteness (Chao et al. 2009 sufficient sampling)", () => {
+  it("matches the paper's approximation m ≈ n f1/(2 f2) · ln(f0 / ((1−g) S))", () => {
+    const t = freqTable(GIRDLED); // n=168, f1=12, f2=4, S=26, Chao1=43.89
+    const r = richnessCompleteness(t, 0.9);
+    const f0 = (167 / 168) * (144 / 8);
+    const approx = ((168 * 12) / 8) * Math.log(f0 / (0.1 * (26 + f0)));
+    expect(r.ratio).toBeCloseTo(26 / 43.892857, 5);
+    expect(r.extraNeeded / approx).toBeGreaterThan(0.98);
+    expect(r.extraNeeded / approx).toBeLessThan(1.02);
+    // Needs ~353 more records (> n = 168) → far from asymptote
+    expect(r.status).toBe("far-from-asymptote");
+  });
+
+  it("is consistent with the q=0 extrapolation: at n+m, richness ≈ g·Chao1", () => {
+    const t = incidenceTable(230, ANT_Y);
+    const r = richnessCompleteness(t, 0.8);
+    // Classic Chao1-based extrapolation evaluated at n + m_g
+    const f0 = hillAsymptotic(t, 0) - t.S;
+    const at = t.S + f0 * (1 - Math.pow(1 - t.f1 / (t.n * f0 + t.f1), r.extraNeeded));
+    expect(at).toBeCloseTo(0.8 * hillAsymptotic(t, 0), 6);
+  });
+
+  it("reports near-asymptote when few species are unseen, and handles edge cases", () => {
+    expect(richnessCompleteness(freqTable([50, 40, 30, 20, 10, 5, 2, 2, 2])).status).toBe("near-asymptote");
+    expect(richnessCompleteness(freqTable([10, 10, 10])).extraNeeded).toBe(0); // no singletons
+    expect(richnessCompleteness(freqTable([])).status).toBe("near-asymptote");
+    const moderate = richnessCompleteness(freqTable([40, 30, 20, 10, 5, 4, 3, 2, 2, 2, 2, 1, 1, 1]), 0.9);
+    expect(["rising", "near-asymptote"]).toContain(moderate.status);
   });
 });

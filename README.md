@@ -308,6 +308,22 @@ written for undergraduate courses and public workshops) and a **PNG** button
 - **KPIs** (beside the map): observed vs. **Chao1-estimated** species (95%
   CI) and **sample coverage**, so "how many species?" always comes with "how
   complete?".
+- **Richness-estimate flag.** Chao1/Chao2 are minimum estimators, so they
+  run low while the accumulation curve is still climbing. The KPI tile and
+  the accumulation table flag each estimate with the sufficient-sampling
+  test of Chao et al. (2009, *Ecology* 90:1125): how much more sampling
+  would it take to record 90% of the estimated species?
+  - *Near flat*: at least 90% of the estimated species are already recorded.
+  - *Flattening*: reaching 90% needs less than doubling the current sample.
+  - *Still steep*: reaching 90% needs more than doubling. That is beyond
+    reliable extrapolation (Chao et al. 2014), so read the estimate as
+    "at least".
+  (`richnessCompleteness` in `lib/inext.ts`.) On the current data, Odonata,
+  Orthoptera, and Plecoptera are near flat, Lepidoptera is flattening, and
+  Diptera, Hymenoptera, Coleoptera, and single counties are still steep.
+  Singletons from misidentifications or strays inflate Chao1, so a steep
+  flag on a well-known group can reflect messy data rather than
+  undiscovered species.
 - **Map**: species, records, completeness (sample coverage) per county, and
   **Survey gaps**. That view uses a ~11 km grid shaded by the chance that
   the next record in each cell is a species new to that cell (1 − coverage,

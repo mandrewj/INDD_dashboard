@@ -18,11 +18,13 @@ import {
   hillObserved,
   incidenceTable,
   makeEstimator,
+  richnessCompleteness,
   sampleCoverage,
   type Chao1,
   type CurvePoint,
   type CurveWithCI,
   type DataType,
+  type RichnessCompleteness,
 } from "./inext";
 
 export interface InextGroupInput {
@@ -57,6 +59,8 @@ export interface InextGroupResult {
   f2: number;
   coverage: number;
   chao1: Chao1;
+  /** Is the q=0 estimate trustworthy yet? (Chao et al. 2009) */
+  richness: RichnessCompleteness;
   observed: [number, number, number];
   asymptotic: [number, number, number];
   /** Bootstrap s.e. of `asymptotic`; null until the CI phase. */
@@ -96,6 +100,7 @@ ctx.onmessage = (e: MessageEvent<InextRequest>) => {
       f2: t.f2,
       coverage: sampleCoverage(t),
       chao1: chao1(t),
+      richness: richnessCompleteness(t),
       observed: QS.map((q) => hillObserved(t, q)) as [number, number, number],
       asymptotic: QS.map((q) => hillAsymptotic(t, q)) as [number, number, number],
       asySe: null,
