@@ -1,19 +1,19 @@
 {
-  "totalRecords":427219,
-  "uniqueSpecies":9127,
-  "uniqueFamilies":537,
+  "totalRecords":428320,
+  "uniqueSpecies":9131,
+  "uniqueFamilies":536,
   "uniqueCountiesObserved":92,
-  "shannonDiversityUnfiltered":6.718609,
+  "shannonDiversityUnfiltered":6.718168,
   "yearObservedMin":1880,
   "yearObservedMax":2026,
   "yearFilterFloor":1880,
   "yearFilterCeil":2026,
   "totalCountiesInIndiana":92,
-  "recordsWithoutCounty":62858,
-  "recordsWithoutYear":10710,
-  "recordsWithoutMonth":38525,
-  "recordsWithoutSpecies":28422,
+  "recordsWithoutCounty":62912,
+  "recordsWithoutYear":10735,
+  "recordsWithoutMonth":38553,
+  "recordsWithoutSpecies":28548,
   "recordsOutOfBboxCoords":266,
   "recordsYearOutOfRange":16,
-  "dataVersion":"0f515fc2124083ee"
+  "dataVersion":"f0d0940b067ad374"
 }
